@@ -68,6 +68,9 @@ class User(Base):
 
 class Product(Base):
     __tablename__ = "products"
+    # name is the natural key for seeding: products are identified by name across
+    # the whole menu, which is what makes scripts/seed.py idempotent.
+    __table_args__ = (UniqueConstraint("name", name="uq_products_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # Real FK. v1 joined products to categories by matching strings

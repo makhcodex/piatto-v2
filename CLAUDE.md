@@ -67,6 +67,7 @@ db/engine.py         lazy engine + session factory, dispose_engine
 db/middleware.py     DatabaseMiddleware injects data["session"] per update
 keyboards/           ported from v1, depends on nothing
 migrations/          Alembic; env.py reads DATABASE_URL from the environment
+scripts/seed.py      standalone menu seed; `python -m scripts.seed` after migrations
 config.py            env parsing; BOT_TOKEN, DATABASE_URL, ADMIN_IDS (frozenset[int]),
                      PAYMENT_CARD_NUMBER, LOGO_URL (optional), WARNING_MINUTES (10),
                      CANCEL_MINUTES (20), ORDER_RATE_LIMIT (5)
@@ -148,17 +149,21 @@ could confirm a payment) → `Bot` with HTML parse mode → `Dispatcher` with `M
 `handlers/render.py`, `handlers/__init__.py`, `handlers/admin/__init__.py`,
 `services/cart_service.py`, `services/sweep.py`, `services/order_service.py`,
 `user_service.get_or_create`, `product_service` and `category_service` read functions,
-`tests/domain/` (30 passing). The Alembic baseline exists:
-`migrations/versions/00ba32237596_initial_schema.py` creates all six tables
-(`down_revision = None`); new schema changes go in a migration on top of it, never by
-editing that file.
+`tests/domain/` (30 passing), `scripts/seed.py`, and the upsert functions the seed uses.
+Migrations: `00ba32237596` creates all six tables (`down_revision = None`), `a1c4f9e27b30`
+adds `uq_products_name`. New schema changes go in a migration on top of the chain, never
+by editing an existing one.
 
 **Stubs — signatures fixed, bodies missing:** every customer handler (`start`, `menu`,
 `cart`, `checkout`), all three admin handler modules, admin CRUD in `product_service` and
 `category_service` (they raise `NotImplementedError`), and all of `tests/services/`
 (every test skips with `TODO`).
 
-**Does not exist yet:** the seed routine for initial categories and products — lives in
-`scripts/seed.py` (standalone script, not part of `main.py` startup). Uses the services
-layer, respects the rule: never overwrite the price of an existing product
-(INSERT ... ON CONFLICT DO UPDATE SET all columns EXCEPT price).
+**Seeding.** `scripts/seed.py` is standalone and never called from `main.py`. It upserts
+through `category_service.upsert` and `product_service.upsert_seed`, keyed on
+`categories.slug` and `uq_products_name`. `upsert_seed` writes `price` on INSERT only and
+omits it from DO UPDATE SET — a re-seed must never undo a price the admin edited in the
+bot. Do not add `price` to that set clause.
+
+**Not written yet:** nothing in the data layer. Remaining work is handler bodies, admin
+CRUD in `product_service`/`category_service`, and the service test suite.
