@@ -1,0 +1,164 @@
+# CLAUDE.md — Piatto v2
+
+Operational guide. Reasoning lives in `docs/architecture.md`; do not duplicate it here.
+
+## Project
+
+Telegram bot for food ordering at a single restaurant. Customers browse a catalogue,
+build a cart, and place delivery orders inside Telegram; the admin manages the menu,
+advances order status, and confirms payments by hand. Payment is manual bank transfer —
+no payment gateway, ever. Stack: aiogram 3 (long polling) + PostgreSQL (SQLAlchemy async)
++ APScheduler in the same process. Deploys to Railway as a `worker`, one instance, no HTTP
+port. This is a greenfield rewrite of `../telegram-order-bot` (v1), which is frozen and
+must not be edited.
+
+## Hard invariants
+
+Never break these. A change that violates one is wrong even if tests pass.
+
+1. **Layer direction is `handlers → services → db`, and `services → domain`.**
+   Handlers never touch `session` and never compute anything. `domain/` calls nothing.
+2. **`domain/` imports no framework.** No `aiogram`, `sqlalchemy`, `asyncpg`, `apscheduler`,
+   and no `db`, `services`, or `handlers`. Enforced by `tests/domain/test_no_framework_imports.py`.
+3. **Money is `Decimal`, always.** `Numeric(10, 2)` in the schema. `float()` must never
+   appear near a price, total, or amount.
+4. **Admin handlers live only under `handlers/admin/`.** Authorisation comes from router
+   membership via `IsAdmin`, attached once in `handlers/admin/__init__.py`. Never add an
+   admin callback to a customer router, and never write a per-handler admin check.
+5. **The cart is `cart_items` in Postgres, quantity only.** No price column. Price is read
+   live from `products`. FSM holds only the checkout wizard step.
+6. **One price snapshot exists**: `order_items.price`, written once in
+   `order_service.create_order`. It is immutable afterwards.
+7. **`domain/` returns facts, not text.** No emoji, no HTML, no user-facing strings below
+   `handlers/`.
+8. **Unhandled exceptions propagate.** Services never swallow database errors. Unexpected
+   exceptions (asyncpg failures, integrity errors) bubble up to aiogram's error handler.
+   Only anticipated, per-item problems use `CartProblem`; everything else is a crash.
+
+## File map
+
+```
+domain/              pure rules — no I/O, no async, no framework
+  models.py          ProductView, CartLine, CartProblem (frozen dataclasses)
+  pricing.py         line_total, cart_total -> Decimal
+  cart_rules.py      check, apply, allowed_to_add
+
+services/            owns the session, transactions, orchestration
+  cart_service.py    cart CRUD; to_view/load_lines/resolve — the bridge into domain/
+  order_service.py   create_order (snapshot + cart clear, one transaction),
+                     status transitions, rate limit
+  sweep.py           periodic payment reminder + auto-cancel, scheduler factory
+  product_service.py product reads, admin CRUD
+  category_service.py category reads, admin CRUD
+  user_service.py    get_or_create(session, telegram_id) -> users.id (int, internal PK,
+                     not telegram_id); every handler calls this first via the session user
+
+handlers/            aiogram routers — I/O and rendering only
+  __init__.py        build_router(); admin router included first
+  render.py          CartProblem/CartLine -> text; the only place emoji live
+  start.py menu.py cart.py checkout.py    customer flows, zero admin handlers
+  admin/__init__.py  IsAdmin filter attached to the router
+  admin/payments.py  confirm/reject payment
+  admin/catalogue.py products and categories
+  admin/orders.py    order list and status advancement
+
+db/models.py         schema; OrderStatus enum, ACTIVE_STATUSES, NEXT_STATUS
+db/engine.py         lazy engine + session factory, dispose_engine
+db/middleware.py     DatabaseMiddleware injects data["session"] per update
+keyboards/           ported from v1, depends on nothing
+migrations/          Alembic; env.py reads DATABASE_URL from the environment
+config.py            env parsing; BOT_TOKEN, DATABASE_URL, ADMIN_IDS (frozenset[int]),
+                     PAYMENT_CARD_NUMBER, LOGO_URL (optional), WARNING_MINUTES (10),
+                     CANCEL_MINUTES (20), ORDER_RATE_LIMIT (5)
+```
+
+## Conventions
+
+**Services return facts; handlers render them.**
+
+- Recoverable, per-item problems: return `CartProblem` (or a list of them) alongside the
+  result. Example: `added, problem = await cart_service.add(...)`.
+- Whole-operation failure: raise a service exception carrying facts, e.g.
+  `CartNotOrderable(problems)`. Handlers catch it and call `render.problems_text`.
+- Never return a formatted string from a service. Never return an ORM row into a handler
+  when a domain value would do.
+
+**Sessions and transactions.** The middleware opens one session per update. Services commit;
+handlers never do. Multi-write operations (`create_order`) commit once at the end and roll
+back on exception.
+
+**Adding to a cart is an addition.** Use `cart_rules.allowed_to_add` and add its return value
+to the existing quantity. Never assign the requested quantity — that was v1's bug #6.
+
+**Notifications must not abort a state change.** Wrap `bot.send_message` in try/except after
+the commit, as `sweep._notify` does.
+
+**Sweep timings.** `WARNING_MINUTES` and `CANCEL_MINUTES` come from `config.py`
+(defaults: 10 and 20). The sweep interval is 60 seconds. These three numbers are the
+only place timing lives — handlers and services read them from config, never hardcode.
+
+**Rate limit.** `create_order` enforces a per-user limit of `ORDER_RATE_LIMIT` orders
+per hour (default: 5, from `config.py`). The service raises `RateLimitExceeded`; the
+handler catches it and shows a message. The limit is checked in the service, not in the
+handler.
+
+**FSM holds the checkout wizard state: current step AND already-entered fields** (name,
+phone, address). It does not hold cart data, product info, or anything that survives a
+restart. Loss of FSM state mid-checkout is acceptable — the user restarts the wizard,
+the cart in Postgres is untouched.
+
+**Keyboards are ported verbatim from v1.** Modify only to fix bugs, not to refactor or
+"improve". They depend on nothing and nothing depends on them.
+
+**Naming.** Services are verbs on the domain (`create_order`, `set_status`, `resolve`).
+Comments and code are English; `docs/` and `README.md` are Russian.
+
+## Tests
+
+```bash
+pytest tests/domain          # no database, no drivers, ~0.1s
+pytest                       # full suite; service tests skip without TEST_DATABASE_URL
+```
+
+Must stay green:
+
+- **30 domain tests** in `tests/domain/`. They run with nothing but `pytest` installed —
+  if they start needing a driver or an event loop, the boundary has leaked.
+- **`test_no_framework_imports.py`** — the only architectural rule a machine enforces.
+
+Never put database fixtures in `tests/conftest.py`; they belong in `tests/services/conftest.py`.
+Service tests use a session inside a transaction that is rolled back per test.
+
+## Startup
+
+```bash
+alembic upgrade head    # separate step, before the process starts; not run by main.py
+python main.py
+```
+
+`main.py` sequence: validate `BOT_TOKEN` and `ADMIN_IDS` (empty `ADMIN_IDS` aborts — nobody
+could confirm a payment) → `Bot` with HTML parse mode → `Dispatcher` with `MemoryStorage` →
+`DatabaseMiddleware` → `build_router()` → `create_scheduler(bot).start()` →
+`delete_webhook(drop_pending_updates=True)` → `start_polling`. Shutdown always runs
+`scheduler.shutdown`, `bot.session.close`, `dispose_engine`.
+
+## Status
+
+**Implemented and working:** all of `domain/`, `db/`, `config.py`, `main.py`,
+`handlers/render.py`, `handlers/__init__.py`, `handlers/admin/__init__.py`,
+`services/cart_service.py`, `services/sweep.py`, `services/order_service.py`,
+`user_service.get_or_create`, `product_service` and `category_service` read functions,
+`tests/domain/` (30 passing).
+
+**Stubs — signatures fixed, bodies missing:** every customer handler (`start`, `menu`,
+`cart`, `checkout`), all three admin handler modules, admin CRUD in `product_service` and
+`category_service` (they raise `NotImplementedError`), and all of `tests/services/`
+(every test skips with `TODO`).
+
+**Does not exist yet:** the Alembic baseline migration — `migrations/versions/` is empty,
+and generating it needs a live `DATABASE_URL`.
+
+Seed routine for initial categories and products — lives in `scripts/seed.py` (standalone
+script, not part of `main.py` startup). Uses services layer, respects the rule: never
+overwrite the price of an existing product (INSERT ... ON CONFLICT DO UPDATE SET all
+columns EXCEPT price).

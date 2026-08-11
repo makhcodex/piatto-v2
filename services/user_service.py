@@ -8,8 +8,12 @@ from db.models import User
 
 async def get_or_create(
     session: AsyncSession, telegram_id: int, username: str | None = None
-) -> User:
-    """Every handler needs the internal user id; this is the single entry point."""
+) -> int:
+    """Return users.id — the internal primary key, not the Telegram id.
+
+    Every handler calls this first. Everything downstream (cart_items.user_id,
+    orders.user_id) keys off the internal id.
+    """
     user = (
         await session.execute(select(User).where(User.telegram_id == telegram_id))
     ).scalar_one_or_none()
@@ -23,7 +27,7 @@ async def get_or_create(
         user.username = username
         await session.commit()
 
-    return user
+    return user.id
 
 
 async def set_phone(session: AsyncSession, user_id: int, phone: str) -> None:

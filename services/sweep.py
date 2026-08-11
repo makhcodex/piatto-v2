@@ -16,9 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from config import (
-    ADMIN_IDS, PAYMENT_CANCEL_AFTER, PAYMENT_REMINDER_AFTER, SWEEP_INTERVAL_SECONDS,
-)
+from config import ADMIN_IDS, CANCEL_MINUTES, SWEEP_INTERVAL_SECONDS, WARNING_MINUTES
 from db.engine import get_session_factory
 from db.models import Order, OrderStatus
 
@@ -34,8 +32,8 @@ async def orders_pending_warning(session: AsyncSession) -> list[Order]:
         .where(
             Order.status == OrderStatus.PENDING,
             Order.warning_sent.is_(False),
-            Order.created_at <= now - timedelta(minutes=PAYMENT_REMINDER_AFTER),
-            Order.created_at > now - timedelta(minutes=PAYMENT_CANCEL_AFTER),
+            Order.created_at <= now - timedelta(minutes=WARNING_MINUTES),
+            Order.created_at > now - timedelta(minutes=CANCEL_MINUTES),
         )
     )
     return list(result.scalars())
@@ -49,7 +47,7 @@ async def orders_to_auto_cancel(session: AsyncSession) -> list[Order]:
         .options(selectinload(Order.user))
         .where(
             Order.status == OrderStatus.PENDING,
-            Order.created_at <= now - timedelta(minutes=PAYMENT_CANCEL_AFTER),
+            Order.created_at <= now - timedelta(minutes=CANCEL_MINUTES),
         )
     )
     return list(result.scalars())
@@ -76,7 +74,7 @@ async def run_once(bot: Bot) -> None:
                 bot,
                 order.user.telegram_id,
                 f"❌ Order #{order.id} was cancelled automatically — payment not received "
-                f"within {PAYMENT_CANCEL_AFTER} minutes.",
+                f"within {CANCEL_MINUTES} minutes.",
             )
             for admin_id in ADMIN_IDS:
                 await _notify(bot, admin_id, f"⏱ Order #{order.id} auto-cancelled (unpaid)")

@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from config import RATE_LIMIT
+from config import ORDER_RATE_LIMIT
 from db.models import ACTIVE_STATUSES, NEXT_STATUS, CartItem, Order, OrderItem, OrderStatus
 from domain import cart_rules, pricing
 from domain.models import CartProblem
@@ -24,23 +24,36 @@ class CartNotOrderable(Exception):
         super().__init__(f"{len(problems)} cart problem(s)")
 
 
-async def within_rate_limit(session: AsyncSession, user_id: int) -> tuple[bool, int]:
+class RateLimitExceeded(Exception):
+    """Too many orders in the last hour. Enforced here, never in a handler."""
+
+    def __init__(self, placed: int, limit: int = ORDER_RATE_LIMIT) -> None:
+        self.placed = placed
+        self.limit = limit
+        super().__init__(f"{placed} orders in the last hour, limit is {limit}")
+
+
+async def orders_in_last_hour(session: AsyncSession, user_id: int) -> int:
     since = datetime.now(timezone.utc) - timedelta(hours=1)
-    count = (
+    return (
         await session.execute(
             select(func.count(Order.id)).where(Order.user_id == user_id, Order.created_at >= since)
         )
     ).scalar() or 0
-    return count < RATE_LIMIT, count
 
 
 async def create_order(session: AsyncSession, user_id: int, address: str) -> Order:
     """Turn the persisted cart into an order, in one transaction.
 
     Raises CartNotOrderable if the cart changed underneath the user — the caller
-    shows the problems and lets them retry. Reads the cart from the database, not
-    from a caller-supplied dict: there is one cart, and it lives in cart_items.
+    shows the problems and lets them retry. Raises RateLimitExceeded past the hourly
+    limit. Reads the cart from the database, not from a caller-supplied dict: there
+    is one cart, and it lives in cart_items.
     """
+    placed = await orders_in_last_hour(session, user_id)
+    if placed >= ORDER_RATE_LIMIT:
+        raise RateLimitExceeded(placed)
+
     lines = await cart_service.load_lines(session, user_id)
     if not lines:
         raise CartNotOrderable([])
