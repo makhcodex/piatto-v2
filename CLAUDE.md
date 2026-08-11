@@ -148,17 +148,17 @@ could confirm a payment) → `Bot` with HTML parse mode → `Dispatcher` with `M
 `handlers/render.py`, `handlers/__init__.py`, `handlers/admin/__init__.py`,
 `services/cart_service.py`, `services/sweep.py`, `services/order_service.py`,
 `user_service.get_or_create`, `product_service` and `category_service` read functions,
-`tests/domain/` (30 passing).
+`tests/domain/` (30 passing). The Alembic baseline exists:
+`migrations/versions/00ba32237596_initial_schema.py` creates all six tables
+(`down_revision = None`); new schema changes go in a migration on top of it, never by
+editing that file.
 
 **Stubs — signatures fixed, bodies missing:** every customer handler (`start`, `menu`,
 `cart`, `checkout`), all three admin handler modules, admin CRUD in `product_service` and
 `category_service` (they raise `NotImplementedError`), and all of `tests/services/`
 (every test skips with `TODO`).
 
-**Does not exist yet:** the Alembic baseline migration — `migrations/versions/` is empty,
-and generating it needs a live `DATABASE_URL`.
-
-Seed routine for initial categories and products — lives in `scripts/seed.py` (standalone
-script, not part of `main.py` startup). Uses services layer, respects the rule: never
-overwrite the price of an existing product (INSERT ... ON CONFLICT DO UPDATE SET all
-columns EXCEPT price).
+**Does not exist yet:** the seed routine for initial categories and products — lives in
+`scripts/seed.py` (standalone script, not part of `main.py` startup). Uses the services
+layer, respects the rule: never overwrite the price of an existing product
+(INSERT ... ON CONFLICT DO UPDATE SET all columns EXCEPT price).
