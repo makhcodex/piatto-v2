@@ -1,0 +1,18 @@
+.env
+*.env
+!.env.example
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Credentials of any kind. v1 committed a Google service-account key.
+*.json
+!package.json
+*.pem
+*.key
+
+*.log
+logs/
