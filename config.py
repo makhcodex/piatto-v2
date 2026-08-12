@@ -16,8 +16,9 @@ DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 # Admin identity lives here, not in a staff table. One restaurant, one operator.
 ADMIN_IDS: frozenset[int] = _parse_admin_ids(os.getenv("ADMIN_IDS", ""))
 
-# Shown to the customer for the manual transfer.
-PAYMENT_CARD_NUMBER: str = os.getenv("PAYMENT_CARD_NUMBER", "")
+# Shown to the customer for the manual transfer. Required at startup: without it
+# nobody can pay. Unset, empty, or whitespace-only all parse to "" — main.py aborts.
+PAYMENT_CARD_NUMBER: str = os.getenv("PAYMENT_CARD_NUMBER", "").strip()
 
 # Optional branding.
 LOGO_URL: str = os.getenv("LOGO_URL", "")

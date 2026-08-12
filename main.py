@@ -6,7 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import ADMIN_IDS, BOT_TOKEN
+from config import ADMIN_IDS, BOT_TOKEN, CANCEL_MINUTES, PAYMENT_CARD_NUMBER
 from db.engine import dispose_engine
 from db.middleware import DatabaseMiddleware
 from handlers import build_router
@@ -24,6 +24,13 @@ async def main() -> None:
         raise RuntimeError("BOT_TOKEN is not set. Check your .env file.")
     if not ADMIN_IDS:
         raise RuntimeError("ADMIN_IDS is empty — nobody could confirm a payment.")
+    if not PAYMENT_CARD_NUMBER:
+        # The bot would run and take orders, but no customer could pay them and the
+        # sweep would auto-cancel every one after CANCEL_MINUTES. Fail loudly instead.
+        raise RuntimeError(
+            "PAYMENT_CARD_NUMBER is empty — nobody could pay, and every order would "
+            f"be auto-cancelled after {CANCEL_MINUTES} minutes."
+        )
 
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 

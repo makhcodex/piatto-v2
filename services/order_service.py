@@ -123,6 +123,24 @@ async def set_status(session: AsyncSession, order_id: int, status: OrderStatus) 
     return order
 
 
+async def settle_payment(
+    session: AsyncSession, order_id: int, status: OrderStatus
+) -> Order | None:
+    """Confirm (PAID) or reject (CANCELLED_UNPAID) a payment awaiting a decision.
+
+    Only PENDING moves. Returns None when the order is gone or already settled —
+    a second tap on the admin buttons must not overwrite a decision, and must not
+    undo an auto-cancel the sweep already made. The caller reports that fact; the
+    guard lives here so no handler has to compare statuses.
+    """
+    order = await get_with_user(session, order_id)
+    if order is None or order.status != OrderStatus.PENDING:
+        return None
+    order.status = status
+    await session.commit()
+    return order
+
+
 async def advance_status(session: AsyncSession, order_id: int) -> Order | None:
     """Move an order to the next status an admin may set."""
     order = await get_with_user(session, order_id)

@@ -91,8 +91,10 @@ back on exception.
 **Adding to a cart is an addition.** Use `cart_rules.allowed_to_add` and add its return value
 to the existing quantity. Never assign the requested quantity — that was v1's bug #6.
 
-**Notifications must not abort a state change.** Wrap `bot.send_message` in try/except after
-the commit, as `sweep._notify` does.
+**Commit first, notify second.** A state change is committed before anyone is told about it,
+and `bot.send_message` is always wrapped in try/except after the commit — see `sweep._notify`
+and `handlers/admin/payments._notify`. A blocked user, a deleted chat, or a Telegram outage
+must never roll back a status the database already accepted.
 
 **Sweep timings.** `WARNING_MINUTES` and `CANCEL_MINUTES` come from `config.py`
 (defaults: 10 and 20). The sweep interval is 60 seconds. These three numbers are the
@@ -137,8 +139,10 @@ alembic upgrade head    # separate step, before the process starts; not run by m
 python main.py
 ```
 
-`main.py` sequence: validate `BOT_TOKEN` and `ADMIN_IDS` (empty `ADMIN_IDS` aborts — nobody
-could confirm a payment) → `Bot` with HTML parse mode → `Dispatcher` with `MemoryStorage` →
+`main.py` sequence: validate `BOT_TOKEN`, `ADMIN_IDS` and `PAYMENT_CARD_NUMBER` (any of them
+empty aborts — with no admin nobody could confirm a payment, with no card number nobody could
+make one, and the sweep would auto-cancel every order after `CANCEL_MINUTES`) → `Bot` with
+HTML parse mode → `Dispatcher` with `MemoryStorage` →
 `DatabaseMiddleware` → `build_router()` → `create_scheduler(bot).start()` →
 `delete_webhook(drop_pending_updates=True)` → `start_polling`. Shutdown always runs
 `scheduler.shutdown`, `bot.session.close`, `dispose_engine`.
