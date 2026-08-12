@@ -42,7 +42,13 @@ async def orders_in_last_hour(session: AsyncSession, user_id: int) -> int:
     ).scalar() or 0
 
 
-async def create_order(session: AsyncSession, user_id: int, address: str) -> Order:
+async def create_order(
+    session: AsyncSession,
+    user_id: int,
+    address: str,
+    contact_name: str,
+    contact_phone: str,
+) -> Order:
     """Turn the persisted cart into an order, in one transaction.
 
     Raises CartNotOrderable if the cart changed underneath the user — the caller
@@ -70,6 +76,8 @@ async def create_order(session: AsyncSession, user_id: int, address: str) -> Ord
             status=OrderStatus.PENDING,
             total_price=total,
             address=address,
+            contact_name=contact_name,
+            contact_phone=contact_phone,
         )
         session.add(order)
         await session.flush()

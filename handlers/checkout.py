@@ -136,6 +136,8 @@ async def step_address(
         return
 
     data = await state.get_data()
+    contact_name = data["name"]
+    contact_phone = data["phone"]
     user_id = await user_service.get_or_create(
         session, message.from_user.id, message.from_user.username
     )
@@ -151,7 +153,9 @@ async def step_address(
     cart_summary = render.cart_text(lines, total)
 
     try:
-        order = await order_service.create_order(session, user_id, address)
+        order = await order_service.create_order(
+            session, user_id, address, contact_name, contact_phone
+        )
     except order_service.CartNotOrderable as exc:
         await state.clear()
         await message.answer(
@@ -174,9 +178,7 @@ async def step_address(
 
     await _notify_admins(
         bot,
-        _admin_notification(
-            order.id, data.get("name", "—"), data.get("phone", "—"), address, cart_summary
-        ),
+        _admin_notification(order.id, contact_name, contact_phone, address, cart_summary),
         get_admin_payment_keyboard(order.id),
     )
 

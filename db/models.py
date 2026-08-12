@@ -128,6 +128,10 @@ class Order(Base):
     )
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     address: Mapped[str] = mapped_column(Text, nullable=False)
+    # Recipient contact, captured per order — it can differ between orders from the
+    # same account. Nullable so existing rows need no backfill.
+    contact_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
