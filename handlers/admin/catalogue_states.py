@@ -20,6 +20,7 @@ class AddProduct(StatesGroup):
 class EditProduct(StatesGroup):
     waiting_for_price = State()
     waiting_for_max_quantity = State()
+    waiting_for_image = State()
 
 
 class AddCategory(StatesGroup):

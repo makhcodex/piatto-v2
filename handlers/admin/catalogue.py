@@ -4,7 +4,8 @@ Callback data, `subsystem:action:id`, with two subsystems that collide with noth
 the customer routers own (`category:`, `item:`, `qty:`, `cart:`, `order:`, `pay:`):
 
     prod:list                prod:detail:{id}    prod:stock:{id}    prod:del:{id}
-    prod:price:{id}          prod:qty:{id}       prod:add           prod:setcat:{id}
+    prod:price:{id}          prod:qty:{id}       prod:photo:{id}    prod:add
+    prod:setcat:{id}
     ctg:list                 ctg:detail:{id}     ctg:rename:{id}    ctg:del:{id}
     ctg:add
 
@@ -26,7 +27,12 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Category, Product
@@ -70,6 +76,7 @@ BAD_QUANTITY = "❌ Максимум в заказе — целое число �
 BAD_SLUG = f"❌ Slug: латиница, цифры и дефис, до {SLUG_MAX} символов. Ещё раз:"
 SLUG_TAKEN = "❌ Категория с таким slug уже есть. Введите другой:"
 BAD_CATEGORY_NAME = f"❌ Название: 1–{CATEGORY_NAME_MAX} символов. Ещё раз:"
+BAD_PHOTO = "❌ Пришлите фото или ссылку на картинку. Ещё раз:"
 
 ASK_NAME = "✏️ Название товара?"
 ASK_DESCRIPTION = f"📝 Описание? Отправьте {SKIP}, чтобы пропустить."
@@ -79,6 +86,8 @@ ASK_QUANTITY = "📦 Максимум штук в одном заказе?"
 ASK_SLUG = "🔤 Slug категории (латиницей, например pizza)?"
 ASK_CATEGORY_NAME = "✏️ Отображаемое название категории?"
 ASK_NEW_NAME = "✏️ Новое название категории?"
+ASK_PHOTO = "🖼 Пришлите фото товара или ссылку на картинку."
+PHOTO_SAVED = "✅ Фото обновлено."
 
 
 # ── Escape hatch — must be registered before any state handler ────────────────
@@ -224,6 +233,40 @@ async def product_set_quantity(
         "Product #%d max_quantity -> %d by admin %s",
         product.id, quantity, message.from_user.id,
     )
+    await _answer_product(message, session, product.id)
+
+
+@router.callback_query(F.data.startswith("prod:photo:"))
+async def product_ask_photo(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(EditProduct.waiting_for_image)
+    await state.update_data(product_id=_arg(callback))
+    await callback.answer()
+    await callback.message.answer(f"{ASK_PHOTO}\n{ABORT_HINT}")
+
+
+@router.message(EditProduct.waiting_for_image, ~F.text.in_(MENU_TEXTS))
+async def product_set_photo(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    # Two accepted inputs, one column: Telegram's file_id or a plain URL. send_photo
+    # takes either, so image_url stores whichever arrived.
+    image_url = _parse_image(message)
+    if image_url is None:
+        await message.answer(BAD_PHOTO)
+        return
+
+    product_id = await _take(state, "product_id")
+    if product_id is None:
+        await message.answer(STALE)
+        return
+
+    product = await product_service.update(session, product_id, image_url=image_url)
+    if product is None:
+        await message.answer(PRODUCT_GONE)
+        return
+
+    logger.info("Product #%d image_url set by admin %s", product.id, message.from_user.id)
+    await message.answer(PHOTO_SAVED)
     await _answer_product(message, session, product.id)
 
 
@@ -488,8 +531,23 @@ async def _product_view(
         return None
     return (
         _product_text(product),
-        get_product_detail_keyboard(product.id, product.in_stock, product.is_deleted),
+        _with_photo_button(
+            get_product_detail_keyboard(product.id, product.in_stock, product.is_deleted),
+            product.id,
+        ),
     )
+
+
+def _with_photo_button(
+    keyboard: InlineKeyboardMarkup, product_id: int
+) -> InlineKeyboardMarkup:
+    """Splice the photo row in above the last one — keyboards/ stays untouched."""
+    rows = list(keyboard.inline_keyboard)
+    rows.insert(
+        max(len(rows) - 1, 0),
+        [InlineKeyboardButton(text="🖼 Фото", callback_data=f"prod:photo:{product_id}")],
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _product_text(product: Product) -> str:
@@ -499,6 +557,7 @@ def _product_text(product: Product) -> str:
         f"Цена: {render.money(product.price)}\n"
         f"Максимум в заказе: {product.max_quantity}\n"
         f"В наличии: {'да' if product.in_stock else 'нет'}\n"
+        f"Фото: {'есть' if product.image_url else 'нет'}\n"
         f"Статус: {'удалён' if product.is_deleted else 'активен'}\n\n"
         f"📝 {product.description or '—'}"
     )
@@ -576,6 +635,14 @@ def _parse_quantity(raw: str | None) -> int | None:
     except ValueError:
         return None
     return quantity
+
+
+def _parse_image(message: Message) -> str | None:
+    """Largest photo size wins; text is taken as a URL. None means "ask again"."""
+    if message.photo:
+        return message.photo[-1].file_id
+    text = (message.text or "").strip()
+    return text or None
 
 
 def _is_slug(slug: str) -> bool:
