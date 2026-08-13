@@ -81,7 +81,11 @@ async def run_once(bot: Bot) -> None:
 
 
 async def _notify(bot: Bot, chat_id: int, text: str) -> None:
-    """A failed notification must not abort the sweep — the DB change already committed."""
+    """A failed notification must not abort the sweep — the DB change already committed.
+
+    Intentional duplication of handlers/notify.notify_user — sweep is a service and
+    must not import from the handler layer.
+    """
     try:
         await bot.send_message(chat_id, text)
     except Exception as exc:

@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import OrderStatus
+from handlers.notify import notify_user
 from services import order_service
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,9 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
 
     logger.info("Payment for order #%d confirmed by admin %s", order.id, callback.from_user.id)
     # Committed first, notified after: the customer's chat cannot roll back the status.
-    await _notify(bot, order.user.telegram_id, f"✅ Оплата подтверждена, заказ #{order.id} принят.")
+    await notify_user(
+        bot, order.user.telegram_id, f"✅ Оплата подтверждена, заказ #{order.id} принят."
+    )
     await _settle_message(callback, "✅ Подтверждено")
     await callback.answer()
 
@@ -49,7 +52,9 @@ async def reject_payment(callback: CallbackQuery, session: AsyncSession, bot: Bo
         return
 
     logger.info("Payment for order #%d rejected by admin %s", order.id, callback.from_user.id)
-    await _notify(bot, order.user.telegram_id, f"❌ Оплата отклонена, заказ #{order.id} отменён.")
+    await notify_user(
+        bot, order.user.telegram_id, f"❌ Оплата отклонена, заказ #{order.id} отменён."
+    )
     await _settle_message(callback, "❌ Отклонено")
     await callback.answer()
 
@@ -73,11 +78,3 @@ async def _settle_message(callback: CallbackQuery, mark: str) -> None:
         # Message too old, already edited, identical content — none of it undoes the
         # committed status change.
         logger.error("Editing the admin message for order decision failed: %s", exc)
-
-
-async def _notify(bot: Bot, chat_id: int, text: str) -> None:
-    """Best effort, as in sweep._notify — the customer may have blocked the bot."""
-    try:
-        await bot.send_message(chat_id, text)
-    except Exception as exc:
-        logger.error("Payment notification to %s failed: %s", chat_id, exc)

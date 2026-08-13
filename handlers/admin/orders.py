@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import NEXT_STATUS, Order
 from handlers import render
+from handlers.notify import notify_user
 from keyboards.orders import get_order_detail_keyboard, get_orders_list_keyboard
 from services import order_service
 
@@ -79,7 +80,7 @@ async def advance_status(callback: CallbackQuery, session: AsyncSession, bot: Bo
     )
     # Committed by the service first, announced after — the customer's chat cannot
     # roll back a status the database already accepted.
-    await _notify(
+    await notify_user(
         bot,
         order.user.telegram_id,
         f"📦 Заказ #{order.id}: {render.status_label(order.status)}",
@@ -161,11 +162,3 @@ async def _show(callback: CallbackQuery, text: str, keyboard: InlineKeyboardMark
     except TelegramBadRequest:
         # Identical content, or a message too old to edit.
         await message.answer(text, reply_markup=keyboard)
-
-
-async def _notify(bot: Bot, chat_id: int, text: str) -> None:
-    """Best effort, as in payments._notify — the customer may have blocked the bot."""
-    try:
-        await bot.send_message(chat_id, text)
-    except Exception as exc:
-        logger.error("Status notification to %s failed: %s", chat_id, exc)

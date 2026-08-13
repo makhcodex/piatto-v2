@@ -57,6 +57,7 @@ handlers/            aiogram routers — I/O and rendering only
   __init__.py        build_router(); admin router included first
   render.py          CartProblem/CartLine -> text; the only place emoji live
   start.py menu.py cart.py checkout.py    customer flows, zero admin handlers
+  notify.py          notify_user(bot, telegram_id, text); admin handlers delegate here
   admin/__init__.py  IsAdmin filter attached to the router
   admin/payments.py  confirm/reject payment
   admin/catalogue.py products and categories
@@ -92,13 +93,15 @@ back on exception.
 to the existing quantity. Never assign the requested quantity — that was v1's bug #6.
 
 **Commit first, notify second.** A state change is committed before anyone is told about it,
-and `bot.send_message` is always wrapped in try/except after the commit — see `sweep._notify`
-and `handlers/admin/payments._notify`. A blocked user, a deleted chat, or a Telegram outage
-must never roll back a status the database already accepted.
+and `bot.send_message` is always wrapped in try/except after the commit — see
+`handlers/notify.notify_user` (used by admin handlers) and `sweep._notify` (intentional
+duplication: the service layer must not import from handlers). A blocked user, a deleted chat,
+or a Telegram outage must never roll back a status the database already accepted.
 
 **Sweep timings.** `WARNING_MINUTES` and `CANCEL_MINUTES` come from `config.py`
-(defaults: 10 and 20). The sweep interval is 60 seconds. These three numbers are the
-only place timing lives — handlers and services read them from config, never hardcode.
+(defaults: 10 and 20). The sweep interval is `SWEEP_INTERVAL_SECONDS` (default 60, from
+config.py). These three numbers are the only place timing lives — handlers and services
+read them from config, never hardcode.
 
 **Rate limit.** `create_order` enforces a per-user limit of `ORDER_RATE_LIMIT` orders
 per hour (default: 5, from `config.py`). The service raises `RateLimitExceeded`; the

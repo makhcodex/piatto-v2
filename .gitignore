@@ -16,3 +16,6 @@ venv/
 
 *.log
 logs/
+
+# temp/dev
+scripts/inspect_last_order.py
