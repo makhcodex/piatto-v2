@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin.orders")
 
 NO_ACTIVE = "Нет активных заказов"
+NO_HISTORY = "История пуста."
+HISTORY_HEADER = "🗂 <b>История заказов</b>"
 GONE = "Заказ не найден"
 TERMINAL = "Заказ уже в финальном статусе"
 NO_CONTACT = "—"
@@ -44,6 +46,14 @@ NO_CONTACT = "—"
 async def cmd_orders(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
     text, keyboard = await _list_view(session)
+    await message.answer(text, reply_markup=keyboard)
+
+
+@router.message(Command("history"))
+async def cmd_history(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    """Every status, not just the working queue — /orders stays active-only."""
+    await state.clear()
+    text, keyboard = await _history_view(session)
     await message.answer(text, reply_markup=keyboard)
 
 
@@ -93,15 +103,30 @@ async def advance_status(callback: CallbackQuery, session: AsyncSession, bot: Bo
 
 async def _list_view(session: AsyncSession) -> tuple[str, InlineKeyboardMarkup | None]:
     orders = await order_service.list_active(session)
+    return _render_list(orders, f"📋 <b>Активные заказы</b> ({len(orders)})", NO_ACTIVE)
+
+
+async def _history_view(session: AsyncSession) -> tuple[str, InlineKeyboardMarkup | None]:
+    orders = await order_service.list_recent(session)
+    return _render_list(orders, HISTORY_HEADER, NO_HISTORY)
+
+
+def _render_list(
+    orders: list[Order], header: str, empty: str
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Shared by the active queue and the history — same rows, same buttons.
+
+    The buttons carry `order:detail:{id}`, so both lists drill down into the one
+    existing card; a terminal order simply arrives there without an advance button.
+    """
     if not orders:
-        return NO_ACTIVE, None
+        return empty, None
 
     rows = "\n\n".join(_summary(order) for order in orders)
-    text = f"📋 <b>Активные заказы</b> ({len(orders)})\n\n{rows}"
     buttons = [
         (order.id, f"#{order.id} · {render.status_label(order.status)}") for order in orders
     ]
-    return text, get_orders_list_keyboard(buttons)
+    return f"{header}\n\n{rows}", get_orders_list_keyboard(buttons)
 
 
 def _summary(order: Order) -> str:

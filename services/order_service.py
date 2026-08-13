@@ -198,3 +198,18 @@ async def list_active(session: AsyncSession) -> list[Order]:
         .order_by(Order.created_at.desc())
     )
     return list(result.scalars())
+
+
+async def list_recent(session: AsyncSession, limit: int = 20) -> list[Order]:
+    """The admin history read: every status, newest first, capped.
+
+    list_active is the working queue and filters by ACTIVE_STATUSES; this one exists
+    to show what that queue drops — delivered and cancelled orders included.
+    """
+    result = await session.execute(
+        select(Order)
+        .options(selectinload(Order.user))
+        .order_by(Order.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars())
