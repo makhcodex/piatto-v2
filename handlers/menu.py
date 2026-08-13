@@ -6,7 +6,7 @@ Cart viewing and editing live in handlers/cart.py. This module only puts things 
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -124,22 +124,22 @@ async def select_item(callback: CallbackQuery, session: AsyncSession, bot: Bot) 
     caption = _product_caption(product)
     keyboard = get_quantity_keyboard(product.id, product.max_quantity)
 
-    if product.image_url:
+    # A caption past the limit is not a photo any more — it would arrive truncated,
+    # so the whole card falls through to the text branch instead.
+    if product.image_url and len(caption) <= CAPTION_LIMIT:
         try:
-            if len(caption) <= CAPTION_LIMIT:
-                await bot.send_photo(
-                    callback.message.chat.id,
-                    product.image_url,
-                    caption=caption,
-                    reply_markup=keyboard,
-                )
-            else:
-                await bot.send_photo(callback.message.chat.id, product.image_url)
-                await callback.message.answer(caption, reply_markup=keyboard)
+            await bot.send_photo(
+                callback.message.chat.id,
+                product.image_url,
+                caption=caption,
+                reply_markup=keyboard,
+            )
             await callback.answer()
             return
-        except TelegramBadRequest as exc:
-            # A broken image_url must not hide the product.
+        except TelegramAPIError as exc:
+            # A broken image_url must not hide the product — same fallback as the
+            # optional logo in start._greet. Every API failure counts, not just 400:
+            # a fetch timeout arrives as TelegramNetworkError.
             logger.warning("Photo failed for product %d (%s): %s",
                            product.id, product.image_url, exc)
 
