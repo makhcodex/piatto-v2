@@ -159,6 +159,37 @@ async def advance_status(session: AsyncSession, order_id: int) -> Order | None:
     return order
 
 
+async def get_for_user(session: AsyncSession, order_id: int, user_id: int) -> Order | None:
+    """One order, but only if this user placed it.
+
+    Same eager loading as get_with_user; the difference is the owner in the WHERE
+    clause. None means "no such order, or not yours" — the two are deliberately
+    indistinguishable, so an id guessed by a customer reveals nothing.
+    """
+    return (
+        await session.execute(
+            select(Order)
+            .options(selectinload(Order.items).selectinload(OrderItem.product))
+            .where(Order.id == order_id, Order.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+
+
+async def list_for_user(session: AsyncSession, user_id: int, limit: int = 20) -> list[Order]:
+    """One customer's own orders, newest first.
+
+    Filtered by user_id — unlike list_active, which is the admin read and deliberately
+    spans every customer. No items are loaded: the caller renders the summary only.
+    """
+    result = await session.execute(
+        select(Order)
+        .where(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars())
+
+
 async def list_active(session: AsyncSession) -> list[Order]:
     result = await session.execute(
         select(Order)

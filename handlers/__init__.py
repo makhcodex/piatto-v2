@@ -6,7 +6,7 @@ under IsAdmin before any customer router can see them.
 
 from aiogram import Router
 
-from handlers import cart, checkout, menu, start
+from handlers import cart, checkout, menu, orders, start
 from handlers import admin
 
 
@@ -17,4 +17,5 @@ def build_router() -> Router:
     root.include_router(menu.router)
     root.include_router(cart.router)
     root.include_router(checkout.router)
+    root.include_router(orders.router)
     return root
