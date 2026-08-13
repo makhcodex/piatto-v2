@@ -105,10 +105,18 @@ async def create_order(
 
 
 async def get_with_user(session: AsyncSession, order_id: int) -> Order | None:
+    """The order plus everything a handler renders: customer, items, their products.
+
+    Eager all the way down. The session is async, so a lazy load reached from a
+    handler raises instead of quietly issuing a query.
+    """
     return (
         await session.execute(
             select(Order)
-            .options(selectinload(Order.user), selectinload(Order.items))
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.items).selectinload(OrderItem.product),
+            )
             .where(Order.id == order_id)
         )
     ).scalar_one_or_none()

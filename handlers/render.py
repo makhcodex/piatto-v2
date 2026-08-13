@@ -10,7 +10,23 @@ a different wording was needed.
 
 from decimal import Decimal
 
+from db.models import OrderStatus
 from domain.models import CartLine, CartProblem
+
+# The status vocabulary is db/models.OrderStatus; the words are UI, so they live here.
+# Nothing below handlers/ may spell a status out loud.
+STATUS_LABELS: dict[OrderStatus, str] = {
+    OrderStatus.PENDING: "⏳ Ожидает оплаты",
+    OrderStatus.PAID: "💳 Оплачен",
+    OrderStatus.PREPARING: "👨‍🍳 Готовится",
+    OrderStatus.DELIVERING: "🚚 В пути",
+    OrderStatus.DELIVERED: "✅ Доставлен",
+    OrderStatus.CANCELLED_UNPAID: "❌ Отменён (не оплачен)",
+}
+
+
+def status_label(status: OrderStatus) -> str:
+    return STATUS_LABELS.get(status, str(status))
 
 
 def problem_text(problem: CartProblem) -> str:

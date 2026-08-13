@@ -110,8 +110,27 @@ phone, address). It does not hold cart data, product info, or anything that surv
 restart. Loss of FSM state mid-checkout is acceptable — the user restarts the wizard,
 the cart in Postgres is untouched.
 
-**Keyboards are ported verbatim from v1.** Modify only to fix bugs, not to refactor or
-"improve". They depend on nothing and nothing depends on them.
+**Admin wizards (`handlers/admin/catalogue_states.py`) hold the step plus the id being
+edited and the fields already typed — never an ORM row.** Every wizard is escapable with
+`/cancel`, and every admin command clears state before starting, so an abandoned wizard
+cannot swallow later messages.
+
+**Keyboards depend on nothing and nothing depends on them.** They take primitives or
+domain values, never a session; v1 ports are kept verbatim, new ones are written for v2.
+
+**Callback data is `subsystem:action:id`.** A subsystem prefix may be split across the
+admin and customer routers only if the action segments are disjoint — the admin router
+is included first and will shadow anything it matches.
+
+**Within a router, handlers are matched in registration order.** A `/cancel` (or any
+escape hatch) must be declared before the state handlers it rescues, or the state handler
+matches first and the wizard has no exit.
+
+**A service read that hides soft-deleted rows keeps the plain name; the admin counterpart
+is suffixed `_for_admin`.** Never change the visibility semantics of an existing name.
+
+**A rule that a wizard must apply mid-flight lives in the service as a public `check_*`
+function.** The handler parses input and calls it; the rule still exists exactly once.
 
 **Naming.** Services are verbs on the domain (`create_order`, `set_status`, `resolve`).
 Comments and code are English; `docs/` and `README.md` are Russian.
@@ -149,25 +168,23 @@ HTML parse mode → `Dispatcher` with `MemoryStorage` →
 
 ## Status
 
-**Implemented and working:** all of `domain/`, `db/`, `config.py`, `main.py`,
-`handlers/render.py`, `handlers/__init__.py`, `handlers/admin/__init__.py`,
-`services/cart_service.py`, `services/sweep.py`, `services/order_service.py`,
-`user_service.get_or_create`, `product_service` and `category_service` read functions,
-`tests/domain/` (30 passing), `scripts/seed.py`, and the upsert functions the seed uses.
+**Implemented and working:** `domain/`, `db/`, `config.py`, `main.py`, `keyboards/`,
+`scripts/seed.py`; all of `services/`, admin CRUD included; every customer
+handler (`start`, `menu`, `cart`, `checkout`); `handlers/render.py`, `handlers/__init__.py`;
+and the admin surface — `admin/__init__.py`, `admin/payments.py` (`pay:` callbacks),
+`admin/orders.py` (`order:` callbacks: active list, detail, advance), `admin/catalogue.py`
+(`prod:` and `ctg:` callbacks: product and category CRUD, FSM wizards in
+`admin/catalogue_states.py`). `tests/domain/` is 30 passing.
+
 Migrations: `00ba32237596` creates all six tables (`down_revision = None`), `a1c4f9e27b30`
 adds `uq_products_name`. New schema changes go in a migration on top of the chain, never
 by editing an existing one.
 
-**Stubs — signatures fixed, bodies missing:** every customer handler (`start`, `menu`,
-`cart`, `checkout`), all three admin handler modules, admin CRUD in `product_service` and
-`category_service` (they raise `NotImplementedError`), and all of `tests/services/`
-(every test skips with `TODO`).
+**Not written yet:** `tests/services/` — every test skips with `TODO`. That is the whole
+remaining backlog.
 
 **Seeding.** `scripts/seed.py` is standalone and never called from `main.py`. It upserts
 through `category_service.upsert` and `product_service.upsert_seed`, keyed on
 `categories.slug` and `uq_products_name`. `upsert_seed` writes `price` on INSERT only and
 omits it from DO UPDATE SET — a re-seed must never undo a price the admin edited in the
 bot. Do not add `price` to that set clause.
-
-**Not written yet:** nothing in the data layer. Remaining work is handler bodies, admin
-CRUD in `product_service`/`category_service`, and the service test suite.
