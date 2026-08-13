@@ -2,7 +2,10 @@
 pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-# Session-scoped, so the engine fixture and the per-test session fixture share
-# one event loop. Function scope raises ScopeMismatch against a session engine.
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "session"
+# Function-scoped, so a test and the fixtures it uses always share one event loop.
+# pytest-asyncio 0.25 has no asyncio_default_test_loop_scope: with the fixtures on
+# the session loop and every test body on its own, one asyncpg connection would be
+# driven from two loops and fail with "another operation is in progress". The engine
+# fixture in tests/services/conftest.py is deliberately synchronous, so a session-
+# scoped engine and a function-scoped connection do not clash.
+asyncio_default_fixture_loop_scope = "function"
