@@ -102,6 +102,23 @@ async def cmd_products(message: Message, state: FSMContext, session: AsyncSessio
     await message.answer(text, reply_markup=keyboard)
 
 
+@router.message(Command("add_product"))
+async def cmd_add_product(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await _start_add_product(message, state, session)
+
+
+@router.message(Command("categories"))
+async def cmd_categories(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
+    text, keyboard = await _categories_view(session)
+    await message.answer(text, reply_markup=keyboard)
+
+
+@router.message(Command("add_category"))
+async def cmd_add_category(message: Message, state: FSMContext) -> None:
+    await _start_add_category(message, state)
+
+
 @router.callback_query(F.data == "prod:list")
 async def products_list(callback: CallbackQuery, session: AsyncSession) -> None:
     await _show(callback, *await _products_view(session))
@@ -211,11 +228,6 @@ async def product_set_quantity(
 
 
 # ── Add product wizard ────────────────────────────────────────────────────────
-
-
-@router.message(Command("add_product"))
-async def cmd_add_product(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    await _start_add_product(message, state, session)
 
 
 @router.callback_query(F.data == "prod:add")
@@ -329,13 +341,6 @@ async def add_product_quantity(
 # ── Categories ────────────────────────────────────────────────────────────────
 
 
-@router.message(Command("categories"))
-async def cmd_categories(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    await state.clear()
-    text, keyboard = await _categories_view(session)
-    await message.answer(text, reply_markup=keyboard)
-
-
 @router.callback_query(F.data == "ctg:list")
 async def categories_list(callback: CallbackQuery, session: AsyncSession) -> None:
     await _show(callback, *await _categories_view(session))
@@ -402,11 +407,6 @@ async def category_set_name(
 
 
 # ── Add category wizard ───────────────────────────────────────────────────────
-
-
-@router.message(Command("add_category"))
-async def cmd_add_category(message: Message, state: FSMContext) -> None:
-    await _start_add_category(message, state)
 
 
 @router.callback_query(F.data == "ctg:add")
@@ -526,7 +526,7 @@ async def _categories_view(session: AsyncSession) -> tuple[str, InlineKeyboardMa
 async def _category_view(
     session: AsyncSession, category_id: int
 ) -> tuple[str, InlineKeyboardMarkup] | None:
-    category = await category_service.get(session, category_id)
+    category = await category_service.get_for_admin(session, category_id)
     if category is None:
         return None
 

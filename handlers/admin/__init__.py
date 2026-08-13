@@ -29,5 +29,5 @@ router.callback_query.filter(IsAdmin())
 from handlers.admin import catalogue, orders, payments  # noqa: E402
 
 router.include_router(payments.router)
-router.include_router(catalogue.router)
 router.include_router(orders.router)
+router.include_router(catalogue.router)

@@ -26,7 +26,7 @@ async def list_for_admin(session: AsyncSession) -> list[Category]:
     return list(result.scalars())
 
 
-async def get(session: AsyncSession, category_id: int) -> Category | None:
+async def get_for_admin(session: AsyncSession, category_id: int) -> Category | None:
     return await session.get(Category, category_id)
 
 

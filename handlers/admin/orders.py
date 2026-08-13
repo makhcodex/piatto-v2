@@ -20,6 +20,7 @@ import logging
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +41,8 @@ NO_CONTACT = "—"
 
 
 @router.message(Command("orders"))
-async def cmd_orders(message: Message, session: AsyncSession) -> None:
+async def cmd_orders(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    await state.clear()
     text, keyboard = await _list_view(session)
     await message.answer(text, reply_markup=keyboard)
 
