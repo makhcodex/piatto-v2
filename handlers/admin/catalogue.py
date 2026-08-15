@@ -29,7 +29,6 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
-    InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
 )
@@ -59,35 +58,35 @@ SLUG_MAX = 32
 CATEGORY_NAME_MAX = 64
 SKIP = "-"
 
-NO_PRODUCTS = "Товаров пока нет."
-NO_CATEGORIES = "Категорий пока нет. Добавьте первую: /add_category"
-PRODUCT_GONE = "Товар не найден"
-CATEGORY_GONE = "Категория не найдена"
-NEED_CATEGORY = "Сначала создайте категорию: /add_category"
-CANCELLED = "Отменено."
-STALE = "Мастер сброшен — начните заново."
-ABORT_HINT = "Отправьте /cancel, чтобы прервать."
-PICK_BUTTON = "Выберите категорию кнопкой выше."
+NO_PRODUCTS = "No products yet."
+NO_CATEGORIES = "No categories yet. Add the first one: /add_category"
+PRODUCT_GONE = "Product not found"
+CATEGORY_GONE = "Category not found"
+NEED_CATEGORY = "Create a category first: /add_category"
+CANCELLED = "Cancelled."
+STALE = "The wizard was reset — start again."
+ABORT_HINT = "Send /cancel to abort."
+PICK_BUTTON = "Pick a category with the buttons above."
 
-BAD_NAME = f"❌ Название: 1–{NAME_MAX} символов. Ещё раз:"
-NAME_TAKEN = "❌ Товар с таким именем уже есть. Введите другое:"
-BAD_PRICE = "❌ Цена — положительное число, например 9.50. Ещё раз:"
-BAD_QUANTITY = "❌ Максимум в заказе — целое число от 1. Ещё раз:"
-BAD_SLUG = f"❌ Slug: латиница, цифры и дефис, до {SLUG_MAX} символов. Ещё раз:"
-SLUG_TAKEN = "❌ Категория с таким slug уже есть. Введите другой:"
-BAD_CATEGORY_NAME = f"❌ Название: 1–{CATEGORY_NAME_MAX} символов. Ещё раз:"
-BAD_PHOTO = "❌ Пришлите фото или ссылку на картинку. Ещё раз:"
+BAD_NAME = f"❌ Name: 1–{NAME_MAX} characters. Try again:"
+NAME_TAKEN = "❌ A product with this name already exists. Enter another one:"
+BAD_PRICE = "❌ Price must be a positive number, for example 9.50. Try again:"
+BAD_QUANTITY = "❌ Max per order must be a whole number from 1. Try again:"
+BAD_SLUG = f"❌ Slug: latin letters, digits and hyphens, up to {SLUG_MAX} characters. Try again:"
+SLUG_TAKEN = "❌ A category with this slug already exists. Enter another one:"
+BAD_CATEGORY_NAME = f"❌ Name: 1–{CATEGORY_NAME_MAX} characters. Try again:"
+BAD_PHOTO = "❌ Send a photo or a link to an image. Try again:"
 
-ASK_NAME = "✏️ Название товара?"
-ASK_DESCRIPTION = f"📝 Описание? Отправьте {SKIP}, чтобы пропустить."
-ASK_PRICE = "💰 Цена? Например 9.50"
-ASK_CATEGORY = "📂 Категория?"
-ASK_QUANTITY = "📦 Максимум штук в одном заказе?"
-ASK_SLUG = "🔤 Slug категории (латиницей, например pizza)?"
-ASK_CATEGORY_NAME = "✏️ Отображаемое название категории?"
-ASK_NEW_NAME = "✏️ Новое название категории?"
-ASK_PHOTO = "🖼 Пришлите фото товара или ссылку на картинку."
-PHOTO_SAVED = "✅ Фото обновлено."
+ASK_NAME = "✏️ Product name?"
+ASK_DESCRIPTION = f"📝 Description? Send {SKIP} to skip."
+ASK_PRICE = "💰 Price? For example 9.50"
+ASK_CATEGORY = "📂 Category?"
+ASK_QUANTITY = "📦 Max units in a single order?"
+ASK_SLUG = "🔤 Category slug (latin letters, for example pizza)?"
+ASK_CATEGORY_NAME = "✏️ Display name for the category?"
+ASK_NEW_NAME = "✏️ New category name?"
+ASK_PHOTO = "🖼 Send a product photo or a link to an image."
+PHOTO_SAVED = "✅ Photo updated."
 
 
 # ── Escape hatch — must be registered before any state handler ────────────────
@@ -151,7 +150,7 @@ async def product_toggle_stock(callback: CallbackQuery, session: AsyncSession) -
         product.id, product.in_stock, callback.from_user.id,
     )
     await _refresh_product(
-        callback, session, product.id, "В наличии" if product.in_stock else "Убрано из наличия"
+        callback, session, product.id, "In stock" if product.in_stock else "Out of stock"
     )
 
 
@@ -167,7 +166,7 @@ async def product_toggle_deleted(callback: CallbackQuery, session: AsyncSession)
         product.id, product.is_deleted, callback.from_user.id,
     )
     await _refresh_product(
-        callback, session, product.id, "Удалён" if product.is_deleted else "Восстановлен"
+        callback, session, product.id, "Deleted" if product.is_deleted else "Restored"
     )
 
 
@@ -377,7 +376,7 @@ async def add_product_quantity(
         max_quantity=quantity,
     )
     logger.info("Product #%d created by admin %s", product.id, message.from_user.id)
-    await message.answer(f"✅ Товар добавлен: <b>{product.name}</b>")
+    await message.answer(f"✅ Product added: <b>{product.name}</b>")
     await _answer_product(message, session, product.id)
 
 
@@ -404,7 +403,9 @@ async def category_toggle_deleted(callback: CallbackQuery, session: AsyncSession
         # Two reasons to refuse. The count is what tells them apart.
         live = await product_service.count_in_category(session, category_id)
         await callback.answer(
-            f"Нельзя скрыть: в категории {live} активных товаров" if live else CATEGORY_GONE,
+            f"Cannot hide: the category still has {live} active products"
+            if live
+            else CATEGORY_GONE,
             show_alert=True,
         )
         return
@@ -414,7 +415,7 @@ async def category_toggle_deleted(callback: CallbackQuery, session: AsyncSession
         category.id, category.is_deleted, callback.from_user.id,
     )
     await _refresh_category(
-        callback, session, category.id, "Скрыта" if category.is_deleted else "Восстановлена"
+        callback, session, category.id, "Hidden" if category.is_deleted else "Restored"
     )
 
 
@@ -497,7 +498,7 @@ async def add_category_name(
 
     category = await category_service.create(session, slug=slug, name=name)
     logger.info("Category #%d created by admin %s", category.id, message.from_user.id)
-    await message.answer(f"✅ Категория добавлена: <b>{category.name}</b>")
+    await message.answer(f"✅ Category added: <b>{category.name}</b>")
     await _answer_category(message, session, category.id)
 
 
@@ -518,7 +519,7 @@ async def _products_view(session: AsyncSession) -> tuple[str, InlineKeyboardMark
             lines.append(f"\n<b>{group}</b>")
         lines.append(f"{_flag(product)} {product.name} — {render.money(product.price)}")
 
-    text = f"📦 <b>Товары</b> ({len(products)})\n" + "\n".join(lines)
+    text = f"📦 <b>Products</b> ({len(products)})\n" + "\n".join(lines)
     rows = [(p.id, p.name, p.in_stock, p.is_deleted) for p in products]
     return text, get_products_keyboard(rows)
 
@@ -531,34 +532,19 @@ async def _product_view(
         return None
     return (
         _product_text(product),
-        _with_photo_button(
-            get_product_detail_keyboard(product.id, product.in_stock, product.is_deleted),
-            product.id,
-        ),
+        get_product_detail_keyboard(product.id, product.in_stock, product.is_deleted),
     )
-
-
-def _with_photo_button(
-    keyboard: InlineKeyboardMarkup, product_id: int
-) -> InlineKeyboardMarkup:
-    """Splice the photo row in above the last one — keyboards/ stays untouched."""
-    rows = list(keyboard.inline_keyboard)
-    rows.insert(
-        max(len(rows) - 1, 0),
-        [InlineKeyboardButton(text="🖼 Фото", callback_data=f"prod:photo:{product_id}")],
-    )
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _product_text(product: Product) -> str:
     return (
         f"{_flag(product)} <b>{product.name}</b>\n"
-        f"Категория: {product.category.name}\n"
-        f"Цена: {render.money(product.price)}\n"
-        f"Максимум в заказе: {product.max_quantity}\n"
-        f"В наличии: {'да' if product.in_stock else 'нет'}\n"
-        f"Фото: {'есть' if product.image_url else 'нет'}\n"
-        f"Статус: {'удалён' if product.is_deleted else 'активен'}\n\n"
+        f"Category: {product.category.name}\n"
+        f"Price: {render.money(product.price)}\n"
+        f"Max per order: {product.max_quantity}\n"
+        f"In stock: {'yes' if product.in_stock else 'no'}\n"
+        f"Photo: {'yes' if product.image_url else 'no'}\n"
+        f"Status: {'deleted' if product.is_deleted else 'active'}\n\n"
         f"📝 {product.description or '—'}"
     )
 
@@ -578,7 +564,7 @@ async def _categories_view(session: AsyncSession) -> tuple[str, InlineKeyboardMa
         f"{'🚫' if c.is_deleted else '✅'} <b>{c.name}</b> — <code>{c.slug}</code>"
         for c in categories
     )
-    text = f"📂 <b>Категории</b> ({len(categories)})\n\n{rows}"
+    text = f"📂 <b>Categories</b> ({len(categories)})\n\n{rows}"
     return text, get_categories_keyboard([(c.id, c.name, c.is_deleted) for c in categories])
 
 
@@ -593,8 +579,8 @@ async def _category_view(
     text = (
         f"{'🚫' if category.is_deleted else '✅'} <b>{category.name}</b>\n"
         f"Slug: <code>{category.slug}</code>\n"
-        f"Активных товаров: {live}\n"
-        f"Статус: {'скрыта' if category.is_deleted else 'активна'}"
+        f"Active products: {live}\n"
+        f"Status: {'hidden' if category.is_deleted else 'active'}"
     )
     return text, get_category_detail_keyboard(category.id, category.is_deleted)
 

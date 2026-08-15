@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 router = Router(name="admin.payments")
 
-ALREADY_SETTLED = "Заказ уже обработан"
+ALREADY_SETTLED = "This order has already been handled"
 
 
 @router.callback_query(F.data.startswith("pay:confirm:"))
@@ -36,9 +36,9 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
     logger.info("Payment for order #%d confirmed by admin %s", order.id, callback.from_user.id)
     # Committed first, notified after: the customer's chat cannot roll back the status.
     await notify_user(
-        bot, order.user.telegram_id, f"✅ Оплата подтверждена, заказ #{order.id} принят."
+        bot, order.user.telegram_id, f"✅ Payment confirmed — order #{order.id} accepted."
     )
-    await _settle_message(callback, "✅ Подтверждено")
+    await _settle_message(callback, "✅ Confirmed")
     await callback.answer()
 
 
@@ -53,9 +53,9 @@ async def reject_payment(callback: CallbackQuery, session: AsyncSession, bot: Bo
 
     logger.info("Payment for order #%d rejected by admin %s", order.id, callback.from_user.id)
     await notify_user(
-        bot, order.user.telegram_id, f"❌ Оплата отклонена, заказ #{order.id} отменён."
+        bot, order.user.telegram_id, f"❌ Payment rejected — order #{order.id} cancelled."
     )
-    await _settle_message(callback, "❌ Отклонено")
+    await _settle_message(callback, "❌ Rejected")
     await callback.answer()
 
 

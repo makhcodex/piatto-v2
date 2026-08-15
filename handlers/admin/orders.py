@@ -34,11 +34,11 @@ logger = logging.getLogger(__name__)
 
 router = Router(name="admin.orders")
 
-NO_ACTIVE = "Нет активных заказов"
-NO_HISTORY = "История пуста."
-HISTORY_HEADER = "🗂 <b>История заказов</b>"
-GONE = "Заказ не найден"
-TERMINAL = "Заказ уже в финальном статусе"
+NO_ACTIVE = "No active orders"
+NO_HISTORY = "The history is empty."
+HISTORY_HEADER = "🗂 <b>Order history</b>"
+GONE = "Order not found"
+TERMINAL = "This order is already in a final status"
 NO_CONTACT = "—"
 
 
@@ -95,7 +95,7 @@ async def advance_status(callback: CallbackQuery, session: AsyncSession, bot: Bo
     await notify_user(
         bot,
         order.user.telegram_id,
-        f"📦 Заказ #{order.id}: {render.status_label(order.status)}",
+        f"📦 Order #{order.id}: {render.status_label(order.status)}",
     )
     await _show(callback, _detail_text(order), _detail_keyboard(order))
     await callback.answer()
@@ -103,7 +103,7 @@ async def advance_status(callback: CallbackQuery, session: AsyncSession, bot: Bo
 
 async def _list_view(session: AsyncSession) -> tuple[str, InlineKeyboardMarkup | None]:
     orders = await order_service.list_active(session)
-    return _render_list(orders, f"📋 <b>Активные заказы</b> ({len(orders)})", NO_ACTIVE)
+    return _render_list(orders, f"📋 <b>Active orders</b> ({len(orders)})", NO_ACTIVE)
 
 
 async def _history_view(session: AsyncSession) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -140,15 +140,15 @@ def _summary(order: Order) -> str:
 def _detail_text(order: Order) -> str:
     items = "\n".join(
         f"• <b>{_product_name(item)}</b> × {item.quantity} — "
-        f"{render.money(item.price)} за шт."
+        f"{render.money(item.price)} each"
         for item in order.items
     )
     return (
-        f"📦 <b>Заказ #{order.id}</b>\n"
-        f"Статус: {render.status_label(order.status)}\n"
-        f"Создан: {_created(order)}\n\n"
+        f"📦 <b>Order #{order.id}</b>\n"
+        f"Status: {render.status_label(order.status)}\n"
+        f"Placed: {_created(order)}\n\n"
         f"{items}\n\n"
-        f"<b>Итого: {render.money(order.total_price)}</b>\n\n"
+        f"<b>Total: {render.money(order.total_price)}</b>\n\n"
         f"👤 {_contact(order)}\n"
         f"📍 {order.address}"
     )

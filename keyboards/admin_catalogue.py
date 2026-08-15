@@ -25,8 +25,8 @@ def get_products_keyboard(rows: list[tuple[int, str, bool, bool]]) -> InlineKeyb
             text=f"{_mark(is_deleted, in_stock)} {name}",
             callback_data=f"prod:detail:{product_id}",
         )
-    b.button(text="➕ Добавить товар", callback_data="prod:add")
-    b.button(text="📂 Категории", callback_data="ctg:list")
+    b.button(text="➕ Add product", callback_data="prod:add")
+    b.button(text="📂 Categories", callback_data="ctg:list")
     b.adjust(*([1] * len(rows)), 2)
     return b.as_markup()
 
@@ -36,17 +36,18 @@ def get_product_detail_keyboard(
 ) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(
-        text="❌ Убрать из наличия" if in_stock else "✅ Вернуть в наличие",
+        text="❌ Mark out of stock" if in_stock else "✅ Mark in stock",
         callback_data=f"prod:stock:{product_id}",
     )
     b.button(
-        text="♻️ Восстановить" if is_deleted else "🗑 Удалить",
+        text="♻️ Restore" if is_deleted else "🗑 Delete",
         callback_data=f"prod:del:{product_id}",
     )
-    b.button(text="💰 Цена", callback_data=f"prod:price:{product_id}")
-    b.button(text="📦 Макс. количество", callback_data=f"prod:qty:{product_id}")
-    b.button(text="◀️ К списку товаров", callback_data="prod:list")
-    b.adjust(2, 2, 1)
+    b.button(text="💰 Price", callback_data=f"prod:price:{product_id}")
+    b.button(text="📦 Max quantity", callback_data=f"prod:qty:{product_id}")
+    b.button(text="🖼 Photo", callback_data=f"prod:photo:{product_id}")
+    b.button(text="◀️ Back to products", callback_data="prod:list")
+    b.adjust(2, 2, 1, 1)
     return b.as_markup()
 
 
@@ -58,20 +59,20 @@ def get_categories_keyboard(rows: list[tuple[int, str, bool]]) -> InlineKeyboard
             text=f"{_mark(is_deleted)} {name}",
             callback_data=f"ctg:detail:{category_id}",
         )
-    b.button(text="➕ Добавить категорию", callback_data="ctg:add")
-    b.button(text="📦 Товары", callback_data="prod:list")
+    b.button(text="➕ Add category", callback_data="ctg:add")
+    b.button(text="📦 Products", callback_data="prod:list")
     b.adjust(*([1] * len(rows)), 2)
     return b.as_markup()
 
 
 def get_category_detail_keyboard(category_id: int, is_deleted: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="✏️ Переименовать", callback_data=f"ctg:rename:{category_id}")
+    b.button(text="✏️ Rename", callback_data=f"ctg:rename:{category_id}")
     b.button(
-        text="♻️ Восстановить" if is_deleted else "🗑 Скрыть",
+        text="♻️ Restore" if is_deleted else "🗑 Hide",
         callback_data=f"ctg:del:{category_id}",
     )
-    b.button(text="◀️ К списку категорий", callback_data="ctg:list")
+    b.button(text="◀️ Back to categories", callback_data="ctg:list")
     b.adjust(2, 1)
     return b.as_markup()
 

@@ -40,9 +40,9 @@ def get_order_detail_keyboard(order_id: int, next_label: str | None) -> InlineKe
     b = InlineKeyboardBuilder()
     if next_label is not None:
         b.button(
-            text=f"➡️ Следующий статус → {next_label}",
+            text=f"➡️ Next status → {next_label}",
             callback_data=f"order:advance:{order_id}",
         )
-    b.button(text="◀️ Назад к списку", callback_data="order:list")
+    b.button(text="◀️ Back to list", callback_data="order:list")
     b.adjust(1)
     return b.as_markup()
