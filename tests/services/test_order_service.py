@@ -293,22 +293,35 @@ async def test_settle_payment_ignores_an_unknown_order(session):
 
 
 async def test_advance_status_walks_the_chain(session, user, make_product):
+    """The chain starts at PAID: settle_payment is what leaves PENDING."""
     product = await make_product()
     await cart_service.add(session, user, product.id, 1)
     order = await _place(session, user)
+    await order_service.settle_payment(session, order.id, OrderStatus.PAID)
 
     walked = []
-    for _ in range(4):
+    for _ in range(3):
         advanced = await order_service.advance_status(session, order.id)
         assert advanced is not None
         walked.append(advanced.status)
 
     assert walked == [
-        OrderStatus.PAID,
         OrderStatus.PREPARING,
         OrderStatus.DELIVERING,
         OrderStatus.DELIVERED,
     ]
+
+
+async def test_advance_status_refuses_to_pay_a_pending_order(session, user, make_product):
+    """PENDING has no successor — only settle_payment may mark an order PAID."""
+    product = await make_product()
+    await cart_service.add(session, user, product.id, 1)
+    order = await _place(session, user)
+
+    assert await order_service.advance_status(session, order.id) is None
+
+    session.expunge_all()
+    assert (await session.get(Order, order.id)).status == OrderStatus.PENDING
 
 
 async def test_advance_status_stops_at_delivered(session, user, make_product):

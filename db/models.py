@@ -31,9 +31,10 @@ ACTIVE_STATUSES = frozenset({
     OrderStatus.DELIVERING,
 })
 
-# Each status -> the next one an admin may set.
+# Each status -> the next one an admin may set. PENDING is deliberately absent:
+# an unpaid order becomes PAID only through order_service.settle_payment, so the
+# advance button can never skip the payment confirmation.
 NEXT_STATUS = {
-    OrderStatus.PENDING: OrderStatus.PAID,
     OrderStatus.PAID: OrderStatus.PREPARING,
     OrderStatus.PREPARING: OrderStatus.DELIVERING,
     OrderStatus.DELIVERING: OrderStatus.DELIVERED,
