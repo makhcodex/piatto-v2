@@ -1,12 +1,13 @@
 """/start and /restart — onboarding and a clean slate."""
 
 import logging
+import os
 
 from aiogram import Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import LOGO_URL
@@ -35,7 +36,8 @@ async def _greet(message: Message, session: AsyncSession, prefix: str = "") -> N
     """Register the user and show the welcome screen.
 
     The logo is optional branding: if LOGO_URL is unset or Telegram cannot fetch it,
-    the text greeting still goes out.
+    the text greeting still goes out. LOGO_URL may be a local path, a URL, or a file_id —
+    a local path is uploaded, anything else is passed through as a string.
     """
     await user_service.get_or_create(
         session, message.from_user.id, message.from_user.username
@@ -45,8 +47,9 @@ async def _greet(message: Message, session: AsyncSession, prefix: str = "") -> N
     keyboard = get_main_keyboard()
 
     if LOGO_URL:
+        photo = FSInputFile(LOGO_URL) if os.path.isfile(LOGO_URL) else LOGO_URL
         try:
-            await message.answer_photo(LOGO_URL, caption=text, reply_markup=keyboard)
+            await message.answer_photo(photo, caption=text, reply_markup=keyboard)
             return
         except TelegramAPIError as exc:
             # Branding must not block onboarding — fall through to plain text.
