@@ -1,7 +1,7 @@
-# Хранить LF в репозитории, гасить CRLF-шум от Windows-редакторов.
+# Keep LF in the repository, damp the CRLF noise from Windows editors.
 * text=auto
 
-# Бинарные ассеты — не трогать.
+# Binary assets — hands off.
 *.jpg  binary
 *.jpeg binary
 *.png  binary

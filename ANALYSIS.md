@@ -1,92 +1,92 @@
-# Анализ старого бота Piatto (v1) — вводные для пересборки
+# Analysis of the old Piatto bot (v1) — the brief for the rebuild
 
-Разбор кодовой базы `telegram-order-bot` (v1), сделанный перед началом работы над `piatto-v2`. Цель — не потерять функциональность старого бота и не повторить его архитектурные проблемы.
-
----
-
-## 1. Описание проекта
-
-**Piatto** — Telegram-бот для заказа еды из ресторана/кафе (пицца, напитки, десерты). Реализует полный цикл: просмотр каталога → корзина → оформление заказа → оплата (ручное подтверждение переводом на карту) → отслеживание статуса заказа. Есть отдельная админ-панель для владельца заведения: управление меню/категориями, обработка заказов, подтверждение оплат, статистика.
-
-v1 — монолит на одном Python-процессе: aiogram (long polling) + PostgreSQL (SQLAlchemy async) + APScheduler в том же event loop. Хостился на Railway как worker-процесс (без HTTP-сервера).
+A breakdown of the `telegram-order-bot` (v1) codebase, made before work on `piatto-v2` began. The goal is not to lose the old bot's functionality and not to repeat its architectural problems.
 
 ---
 
-## 2. Функциональность — пользователь (клиент)
+## 1. Project description
 
-- **`/start`** — приветствие (+ логотип, если задан `LOGO_URL`), создание/апдейт записи пользователя, показ reply-клавиатуры: `📋 Каталог | 🛒 Корзина | ✅ Оформить заказ | 📦 Мои заказы`.
-- **`/cancel`** — отмена текущей FSM-операции без сброса корзины.
-- **`/restart`** — полный сброс состояния.
-- **Каталог** → категории → товары (фото, описание, цена, макс. количество) → быстрый выбор количества (кнопки 1/2/3/4 или "✏️ Своё количество").
-- **Корзина** — хранится только в FSM-памяти (не в БД!). Просмотр, редактирование количества, удаление позиции, очистка корзины. Сообщение корзины редактируется на месте (не плодит дубликаты в чате).
-- **Оформление заказа** — 3 шага (имя → телефон с валидацией регуляркой → адрес, должен содержать цифру). Rate limit: 5 заказов/час/пользователь. Перед созданием заказа корзина повторно валидируется против БД (наличие, сток, актуальная цена, макс. количество) — если что-то изменилось, оформление блокируется с объяснением.
-- **Оплата** — ручная: бот показывает статичный номер карты, пользователь жмёт "✅ Я оплатил", админ вручную подтверждает/отклоняет через инлайн-кнопки. Реальной платёжной интеграции нет.
-- **Напоминания/автоотмена** — через APScheduler: через 10 мин — напоминание об оплате, через 20 мин — автоотмена неоплаченного заказа.
-- **"Мои заказы"** — последние 10 заказов клиента с деталями и статусом.
-- Статусы заказа (линейно): `pending → paid → preparing → delivering → delivered`, отдельный терминальный `cancelled_unpaid`.
+**Piatto** is a Telegram bot for ordering food from a restaurant/café (pizza, drinks, desserts). It implements the full cycle: browsing the catalogue → cart → placing the order → payment (manual confirmation of a card transfer) → tracking the order status. There is a separate admin panel for the owner: menu/category management, order processing, payment confirmation, statistics.
 
-## 3. Функциональность — админ
+v1 is a monolith in a single Python process: aiogram (long polling) + PostgreSQL (SQLAlchemy async) + APScheduler in the same event loop. It was hosted on Railway as a worker process (no HTTP server).
 
-Доступ по единственному захардкоженному `ADMIN_ID` (ролей/уровней доступа нет).
+---
 
-- **Активные заказы** — список, детали, кнопка "следующий статус" (по линейной цепочке), удаление заказа (запрещено для `delivered`).
-- **История заказов** — пагинация (10/страница), фильтр по статусу.
-- **Статистика** — количество заказов, выручка, разбивка по статусам.
-- **Товары** — добавление (5 шагов: имя → описание → цена → категория → макс. кол-во), редактирование полей, включение/выключение "в наличии", мягкое удаление.
-- **Категории** — добавление (slug + имя), переименование, мягкое удаление (запрещено, если есть привязанные товары).
-- **Подтверждение/отклонение оплаты** — из уведомления о заявке клиента.
+## 2. Functionality — the user (customer)
 
-## 4. Технический стек (v1)
+- **`/start`** — a greeting (+ the logo, if `LOGO_URL` is set), creating/updating the user record, showing the reply keyboard: `📋 Catalogue | 🛒 Cart | ✅ Place order | 📦 My orders`.
+- **`/cancel`** — cancelling the current FSM operation without clearing the cart.
+- **`/restart`** — a full state reset.
+- **Catalogue** → categories → products (photo, description, price, max quantity) → quick quantity choice (buttons 1/2/3/4 or "✏️ Custom quantity").
+- **Cart** — stored in FSM memory only (not in the database!). Viewing, editing the quantity, removing a line, clearing the cart. The cart message is edited in place (it does not breed duplicates in the chat).
+- **Placing an order** — 3 steps (name → phone validated by a regex → address, must contain a digit). Rate limit: 5 orders/hour/user. Before the order is created the cart is validated against the database again (availability, stock, current price, max quantity) — if something has changed, placing the order is blocked with an explanation.
+- **Payment** — manual: the bot shows a static card number, the user presses "✅ I have paid", the admin confirms/rejects by hand through inline buttons. There is no real payment integration.
+- **Reminders/auto-cancel** — through APScheduler: after 10 min a payment reminder, after 20 min an auto-cancel of the unpaid order.
+- **"My orders"** — the customer's last 10 orders with details and status.
+- Order statuses (linear): `pending → paid → preparing → delivering → delivered`, plus a separate terminal `cancelled_unpaid`.
 
-| Компонент | Технология |
+## 3. Functionality — the admin
+
+Access by a single hardcoded `ADMIN_ID` (there are no roles/access levels).
+
+- **Active orders** — list, details, a "next status" button (along the linear chain), deleting an order (forbidden for `delivered`).
+- **Order history** — pagination (10/page), filter by status.
+- **Statistics** — order count, revenue, breakdown by status.
+- **Products** — adding (5 steps: name → description → price → category → max quantity), editing fields, toggling "in stock", soft deletion.
+- **Categories** — adding (slug + name), renaming, soft deletion (forbidden if there are products attached).
+- **Confirming/rejecting a payment** — from the notification about the customer's claim.
+
+## 4. Technical stack (v1)
+
+| Component | Technology |
 |---|---|
-| Bot framework | aiogram 3.28.2, long polling (не webhook) |
-| FSM/состояние | `MemoryStorage` — **в памяти процесса, не персистентно** |
-| БД | PostgreSQL + SQLAlchemy 2.0 (async) + asyncpg |
-| Планировщик | APScheduler (`AsyncIOScheduler`), **без persistent jobstore** |
-| Хостинг | Railway, `worker`-процесс, без HTTP-порта |
-| Прочее | Supabase Storage (только для одноразового скрипта загрузки логотипа), Google Sheets — заявлено в README/зависимостях, но **нигде не реализовано** (мёртвая фича) |
-| Тесты | Отсутствуют как framework; есть 2 ad-hoc скрипта-симуляции с ручными `assert`, гоняются вручную против реальной БД |
+| Bot framework | aiogram 3.28.2, long polling (not webhook) |
+| FSM/state | `MemoryStorage` — **in process memory, not persistent** |
+| Database | PostgreSQL + SQLAlchemy 2.0 (async) + asyncpg |
+| Scheduler | APScheduler (`AsyncIOScheduler`), **no persistent jobstore** |
+| Hosting | Railway, a `worker` process, no HTTP port |
+| Other | Supabase Storage (only for a one-off logo upload script), Google Sheets — declared in the README/dependencies, but **implemented nowhere** (a dead feature) |
+| Tests | Absent as a framework; there are 2 ad-hoc simulation scripts with hand-written `assert`s, run manually against the real database |
 
-### Модель данных (PostgreSQL, 5 таблиц)
+### The data model (PostgreSQL, 5 tables)
 
 - `categories` (id, slug, name, is_deleted)
 - `users` (id, telegram_id, username, phone, created_at)
-- `products` (id, name, category [строка, **не настоящий FK** на `categories.slug`], description, price, image_url, in_stock, max_quantity, is_deleted)
-- `orders` (id, user_id→users FK, status [строка, не enum], total_price, address, created_at, warning_sent, reminder_job_id, cancel_job_id)
-- `order_items` (id, order_id FK, product_id FK, quantity, price [снапшот цены на момент заказа])
+- `products` (id, name, category [a string, **not a real FK** to `categories.slug`], description, price, image_url, in_stock, max_quantity, is_deleted)
+- `orders` (id, user_id→users FK, status [a string, not an enum], total_price, address, created_at, warning_sent, reminder_job_id, cancel_job_id)
+- `order_items` (id, order_id FK, product_id FK, quantity, price [a snapshot of the price at the moment of the order])
 
-Миграций через Alembic не было — вместо этого `db/init_db.py` на каждом старте гонял raw-SQL "safe migrations" (`ADD COLUMN IF NOT EXISTS` в try/except, конвертация legacy Postgres enum → varchar, перевод старых RU-названий товаров на EN) и **безусловно перезаписывал цены сид-товаров** значениями из кода — то есть правки цен через админку для этих товаров откатывались при каждом деплое.
-
----
-
-## 5. Архитектурные проблемы v1 (не повторять в v2)
-
-1. **Корзина и джобы планировщика жили только в памяти процесса.** Любой рестарт/редеплой стирал все текущие корзины у всех пользователей и терял запланированные напоминания/автоотмены "зависших" заказов. → В v2 нужно персистентное хранилище состояния (БД или Redis).
-2. **Нет реальных внешних ключей** между `products.category` и `categories.slug` — просто совпадение строк, возможны рассинхронизации.
-3. **Нет системы миграций** (Alembic) — эволюция схемы через идемпотентные raw-SQL патчи в коде запуска, с проглатыванием ошибок (`except: pass`).
-4. **Опасный сайд-эффект в сидинге**: цены сид-товаров принудительно перезаписывались на каждом старте, что убивало ручные правки цен админом.
-5. **Дублирование бизнес-логики**: расчёт корзины/лимитов количества продублирован в 3+ местах (`menu.py`, `checkout.py`, `admin.py`) вместо единого сервиса.
-6. **Несогласованность UX-сообщений и логики**: сообщения про "можно добавить ещё N" остались от старой аддитивной логики количества, хотя операция стала перезаписью (setter), а не инкрементом.
-7. **Один захардкоженный админ** (`ADMIN_ID` в env) — нет ролей/множественного доступа персонала.
-8. **Нет реальной оплаты** — только вручную подтверждаемый банковский перевод; для продакшна нужна платёжная интеграция (Telegram Payments API / YooKassa / Stripe и т.п.).
-9. **Заявленная, но не реализованная фича** — синхронизация с Google Sheets (зависимости и документация были, кода не было).
-10. **Отсутствие автотестов** — только ручные debug-скрипты, которые мутировали реальную БД по `DATABASE_URL`.
-11. **Гигиена репозитория**: незакоммиченный, но лежащий в корне JSON-ключ сервисного аккаунта Google, файлы логов и случайный артефакт `=3.10.0` от неверно набранной команды pip.
-12. **Long polling предполагает единственный запущенный инстанс** — в логах были следы конфликта нескольких инстансов на одном токене (dev + прод одновременно).
+There were no Alembic migrations — instead, `db/init_db.py` ran raw-SQL "safe migrations" on every start (`ADD COLUMN IF NOT EXISTS` inside try/except, converting a legacy Postgres enum → varchar, translating old RU product names to EN) and **unconditionally overwrote the prices of seed products** with the values from the code — meaning price edits made through the admin panel for those products were rolled back on every deploy.
 
 ---
 
-## 6. Затравка для планирования v2
+## 5. v1's architectural problems (not to be repeated in v2)
 
-Темы, которые стоит явно продумать при проектировании новой архитектуры:
+1. **The cart and the scheduler jobs lived in process memory only.** Any restart/redeploy wiped every user's current cart and lost the scheduled reminders/auto-cancels of "stuck" orders. → v2 needs persistent state storage (a database or Redis).
+2. **No real foreign keys** between `products.category` and `categories.slug` — just strings matching, so drift is possible.
+3. **No migration system** (Alembic) — schema evolution through idempotent raw-SQL patches in the startup code, with errors swallowed (`except: pass`).
+4. **A dangerous side effect in the seeding**: the prices of seed products were force-overwritten on every start, which killed the admin's manual price edits.
+5. **Duplicated business logic**: the cart/quantity-limit calculation is duplicated in 3+ places (`menu.py`, `checkout.py`, `admin.py`) instead of a single service.
+6. **UX messages and logic out of sync**: the "you can add N more" messages are left over from the old additive quantity logic, although the operation became an overwrite (a setter), not an increment.
+7. **A single hardcoded admin** (`ADMIN_ID` in env) — no roles/multiple staff access.
+8. **No real payment** — only a manually confirmed bank transfer; production would need a payment integration (Telegram Payments API / YooKassa / Stripe and the like).
+9. **A declared but unimplemented feature** — synchronisation with Google Sheets (the dependencies and the documentation were there, the code was not).
+10. **No automated tests** — only manual debug scripts, which mutated the real database at `DATABASE_URL`.
+11. **Repository hygiene**: an uncommitted but present-in-the-root JSON key of a Google service account, log files and an accidental `=3.10.0` artefact from a mistyped pip command.
+12. **Long polling assumes a single running instance** — the logs held traces of a conflict between several instances on one token (dev + prod at the same time).
 
-- Персистентное хранилище корзины/сессии (БД или Redis) вместо in-memory FSM.
-- Persistent jobstore для планировщика (или вынос напоминаний/автоотмены в отдельный воркер с БД-очередью).
-- Нормальная миграционная система (Alembic) с первого дня.
-- Реальный FK между товарами и категориями.
-- Единый сервис расчёта корзины/лимитов (устранить дублирование).
-- Роли/множественный доступ для персонала вместо одного `ADMIN_ID`.
-- Реальная платёжная интеграция или осознанное решение оставить ручное подтверждение.
-- Решить: нужна ли Google Sheets синхронизация вообще, или убрать из скоупа.
-- Автотесты (pytest) с первого дня, без мутации прод-БД debug-скриптами.
+---
+
+## 6. A starting point for planning v2
+
+Topics worth thinking through explicitly when designing the new architecture:
+
+- Persistent cart/session storage (a database or Redis) instead of the in-memory FSM.
+- A persistent jobstore for the scheduler (or moving reminders/auto-cancel into a separate worker with a database-backed queue).
+- A proper migration system (Alembic) from day one.
+- A real FK between products and categories.
+- A single service for cart/limit calculation (removing the duplication).
+- Roles/multiple staff access instead of a single `ADMIN_ID`.
+- A real payment integration, or a deliberate decision to keep manual confirmation.
+- Decide: is Google Sheets synchronisation needed at all, or does it leave the scope.
+- Automated tests (pytest) from day one, without debug scripts mutating the production database.

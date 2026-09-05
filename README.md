@@ -1,124 +1,123 @@
 # Piatto v2
 
-Telegram-бот заказа еды для одного ресторана: каталог, корзина, чекаут и ручное
-подтверждение оплаты — всё внутри Telegram.
+Telegram bot for food ordering at a single restaurant: catalogue, cart, checkout and
+manual payment confirmation — all inside Telegram.
 
-## Демо
+## Demo
 
-<!-- Живой бот: @______bot — добавить ссылку после деплоя -->
+<!-- Live bot: @______bot — add the link after deploy -->
 
 <!--
-## Скриншоты
-Заполнить после деплоя. Кадры: витрина каталога с фото · корзина · чекаут ·
-«Мои заказы» · админ-уведомление с кнопками подтверждения оплаты.
+## Screenshots
+Fill in after deploy. Frames: catalogue with photos · cart · checkout ·
+"My Orders" · admin notification with payment confirmation buttons.
 -->
 
-## Возможности
+## Features
 
-**Клиент.** Каталог по категориям с фото, корзина с контролем количества, чекаут
-(имя, телефон, адрес), «Мои заказы» — список и карточка заказа с защитой от чужих
-идентификаторов. Статусы приходят пушами. Оплата — ручное подтверждение перевода
-на карту, платёжных шлюзов нет.
+**Customer.** Catalogue by category with photos, cart with quantity control, checkout
+(name, phone, address), "My Orders" — list and order card, guarded against someone
+else's identifiers. Status changes arrive as pushes. Payment is manual bank transfer
+confirmed by hand; there are no payment gateways.
 
-**Админ.** Подтверждение и отклонение оплаты кнопками прямо на уведомлении о
-заказе; очередь активных заказов с продвижением статуса и пушем клиенту; история
-всех статусов; CRUD меню и категорий через FSM-визарды; фото товара по `file_id`
-или URL. Авторизация — принадлежность админскому роутеру, а не проверка в теле.
+**Admin.** Confirm or reject a payment with buttons on the order notification itself;
+a queue of active orders with status advancement and a push to the customer; history
+of every status; menu and category CRUD through FSM wizards; product photo by `file_id`
+or URL. Authorisation is membership of the admin router, not a check inside a handler.
 
-**Фон.** APScheduler в том же процессе: напоминание об оплате и авто-отмена
-неоплаченных заказов по таймауту.
+**Background.** APScheduler in the same process: payment reminder and auto-cancel of
+unpaid orders on timeout.
 
-Статусы: `PENDING → PAID → PREPARING → DELIVERING → DELIVERED`, плюс
-`CANCELLED_UNPAID`. Оплата проходит только через отдельный переход — ключ `PENDING`
-убран из таблицы переходов, продвинуть заказ в оплаченный «руками» нельзя.
+Statuses: `PENDING → PAID → PREPARING → DELIVERING → DELIVERED`, plus
+`CANCELLED_UNPAID`. Payment goes only through its own transition — the `PENDING` key is
+removed from the transition table, so an order cannot be advanced to paid by hand.
 
-## Стек
+## Stack
 
 Python 3.11 · aiogram 3 (long polling) · PostgreSQL · SQLAlchemy 2 (async) ·
-APScheduler · Alembic · Railway (worker, без HTTP-порта).
+APScheduler · Alembic · Railway (worker, no HTTP port).
 
-## Архитектура
+## Architecture
 
-### Структура
+### Layout
 
 ```
-domain/      чистые правила: без aiogram, без sqlalchemy, без async
-services/    работа с БД, транзакции, оркестрация
-handlers/    aiogram-роутеры: только I/O и рендер
-keyboards/   клавиатуры, ни от кого не зависят
-db/          модели, движок, middleware
+domain/      pure rules: no aiogram, no sqlalchemy, no async
+services/    database work, transactions, orchestration
+handlers/    aiogram routers: I/O and rendering only
+keyboards/   keyboards, depend on nothing
+db/          models, engine, middleware
 migrations/  Alembic
-tests/       юниты domain/ и интеграционные сервисов
+tests/       domain/ unit tests and service integration tests
 ```
 
-Направление зависимостей одно: `handlers → services → db`, и `services → domain`.
+The dependency direction is one way: `handlers → services → db`, and `services → domain`.
 
-### Три правила
+### Three rules
 
-1. **`domain/` не импортирует фреймворки.** Проверяется тестом
-   `tests/domain/test_no_framework_imports.py`. Единственная граница здесь,
-   которую сторожит машина, а не ревью.
-2. **Хендлер не открывает сессию и ничего не считает.** Только вызов сервиса.
-3. **Админский хендлер лежит только под `handlers/admin/`.** Авторизация —
-   свойство принадлежности роутеру, а не проверка в теле обработчика.
+1. **`domain/` imports no framework.** Enforced by
+   `tests/domain/test_no_framework_imports.py`. The one boundary here that a machine
+   guards rather than review.
+2. **A handler opens no session and computes nothing.** It calls a service, that is all.
+3. **An admin handler lives only under `handlers/admin/`.** Authorisation is a property
+   of router membership, not a check in the body of a handler.
 
-Архитектурные решения и их обоснования — `docs/architecture.md`.
+Architectural decisions and their reasoning — `docs/architecture.md`.
 
 ## Background
 
-Greenfield-пересборка: v1 заморожен в соседнем репозитории `telegram-order-bot`
-и не дорабатывается, v2 написан с нуля с учётом его ошибок — разбор и вводные
-в `ANALYSIS.md`.
+A greenfield rebuild: v1 is frozen in the neighbouring repository `telegram-order-bot`
+and is not developed further, v2 is written from scratch with its mistakes accounted
+for — the analysis and the brief are in `ANALYSIS.md`.
 
-## Scope и осознанные не-цели
+## Scope and deliberate non-goals
 
-- **Оплата — только ручное подтверждение перевода.** Платёжных интеграций нет.
-- **Google Sheets не подключается.** Выкинуто вместе с четырьмя зависимостями.
-- **Один ресторан, один деплой.** Мультитенантности нет.
-- **Админы — множество идентификаторов в окружении.** Таблицы `staff` нет.
+- **Payment is manual transfer confirmation only.** No payment integrations.
+- **Google Sheets is not wired in.** Dropped along with four dependencies.
+- **One restaurant, one deployment.** No multi-tenancy.
+- **Admins are a set of identifiers in the environment.** No `staff` table.
 
-## Запуск
+## Running it
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate      # Windows
 pip install -r requirements.txt
-cp .env.example .env                                 # заполнить BOT_TOKEN, ADMIN_IDS, DATABASE_URL
+cp .env.example .env                                 # fill in BOT_TOKEN, ADMIN_IDS, DATABASE_URL
 alembic upgrade head
 python main.py
 ```
 
-`ADMIN_IDS` не может быть пустым — бот откажется стартовать, иначе подтвердить
-оплату будет некому.
+`ADMIN_IDS` must not be empty — the bot refuses to start, because otherwise nobody
+could confirm a payment.
 
-## Миграции
+## Migrations
 
 ```bash
-alembic revision --autogenerate -m "описание"
+alembic revision --autogenerate -m "description"
 alembic upgrade head
 alembic downgrade -1
 ```
 
-Строка подключения в `alembic.ini` отсутствует намеренно: `migrations/env.py`
-читает `DATABASE_URL` из окружения.
+The connection string is absent from `alembic.ini` on purpose: `migrations/env.py`
+reads `DATABASE_URL` from the environment.
 
-## Тесты
+## Tests
 
 ```bash
-pytest tests/domain                  # без базы, миллисекунды
-export TEST_DATABASE_URL=...         # отдельная база, схема пересоздаётся
-pytest                               # всё вместе
+pytest tests/domain                  # no database, milliseconds
+export TEST_DATABASE_URL=...         # separate database, schema is recreated
+pytest                               # everything together
 ```
 
-Полный прогон — 107 тестов: 30 доменных (без базы и драйверов) плюс интеграционный
-слой сервисов на реальном Postgres (order, sweep, cart), фикстура с откатом на
-SAVEPOINT. Тесты сервисов пропускаются, если `TEST_DATABASE_URL` не задан.
+A full run is 107 tests: 30 domain ones (no database, no drivers) plus the service
+integration layer against a real Postgres (order, sweep, cart), with a SAVEPOINT
+rollback fixture. Service tests are skipped when `TEST_DATABASE_URL` is unset.
 
-Хендлеры автоматически не тестируются — после выноса правил в `domain/` в них не
-остаётся логики, которую стоило бы ловить. Happy path проверяется руками.
+Handlers are not tested automatically — once the rules moved into `domain/`, no logic
+worth catching is left in them. The happy path is checked by hand.
 
-## Деплой
+## Deploy
 
-Railway, тип сервиса `worker`, long polling, без HTTP-порта. Один инстанс:
-второй на том же токене приведёт к конфликту получения обновлений.
-`alembic upgrade head` — отдельный шаг перед стартом (Pre-deploy Command),
-`main.py` миграции не запускает.
+Railway, service type `worker`, long polling, no HTTP port. One instance: a second one
+on the same token causes an update-fetching conflict. `alembic upgrade head` is a
+separate step before startup (Pre-deploy Command); `main.py` does not run migrations.

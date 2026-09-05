@@ -1,210 +1,210 @@
-# Piatto v2 — архитектура (решения зафиксированы)
+# Piatto v2 — architecture (decisions locked in)
 
-Источник: анализ v1 в `.claude/plans/majestic-strolling-nest.md`.
-Стресс-тест черновика и обоснования решений: `.claude/plans/grill-me-docs-architecture-draft-md-kind-rocket.md`.
+Source: the v1 analysis in `.claude/plans/majestic-strolling-nest.md`.
+Stress test of the draft and the reasoning behind the decisions: `.claude/plans/grill-me-docs-architecture-draft-md-kind-rocket.md`.
 
-Все восемь развилок закрыты. Ниже — принятая архитектура, без кода.
+All eight branches are closed. Below is the accepted architecture, without code.
 
-## Ограничения
+## Constraints
 
-- Один ресторан, один деплой, один разработчик. Мультитенантности нет ни в схеме, ни в правах.
-- Платежи — только ручное подтверждение перевода. Telegram Payments и внешние гейтвеи исключены.
-- Railway остаётся `worker`-процессом, long polling, без HTTP-порта.
-- **v1 не дорабатывается.** Он замораживается и остаётся запущенным до перехода.
+- One restaurant, one deployment, one developer. No multi-tenancy, neither in the schema nor in the permissions.
+- Payments — manual transfer confirmation only. Telegram Payments and external gateways are excluded.
+- Railway stays a `worker` process, long polling, no HTTP port.
+- **v1 is not developed further.** It is frozen and stays running until the switchover.
 
-## Стратегия перехода (ветка 1)
+## Transition strategy (branch 1)
 
-**Greenfield.** Новый репозиторий `piatto-v2`, рядом с v1. Переносятся как есть только `keyboards/*` и `config.py`, остальное пишется заново.
+**Greenfield.** A new repository `piatto-v2`, next to v1. Only `keyboards/*` and `config.py` are carried over as they are, everything else is written again.
 
-Ключевой факт, снявший основной риск: **у v1 нет реальных клиентов** — только разработчик и тестовые пользователи. Отсюда:
+The key fact that removed the main risk: **v1 has no real customers** — only the developer and test users. Hence:
 
-- миграция данных не нужна, у v2 своя чистая база;
-- набор тестов на паритет с v1 не нужен;
-- откат тривиален — переключить токен обратно на v1;
-- критерий перехода: «v2 проходит happy path», а не «совпадает с v1 по всем сценариям».
+- no data migration is needed, v2 has its own clean database;
+- no parity test suite against v1 is needed;
+- rollback is trivial — point the token back at v1;
+- the switchover criterion is "v2 passes the happy path", not "v2 matches v1 on every scenario".
 
-## Слои и границы
+## Layers and boundaries
 
 ```
-handlers/   aiogram-роутеры: только I/O и рендер клавиатур
+handlers/   aiogram routers: I/O and keyboard rendering only
       ↓
-services/   работа с БД, транзакции, оркестрация
+services/   database work, transactions, orchestration
       ↓
-db/         модели SQLAlchemy, движок, миграции
+db/         SQLAlchemy models, engine, migrations
 
-domain/     чистые правила: без aiogram, без sqlalchemy
-      ↑     вызывается из services/, ничего не вызывает сам
+domain/     pure rules: no aiogram, no sqlalchemy
+      ↑     called from services/, calls nothing itself
 ```
 
-`keyboards/*` — чистый UI-слой, ни от кого не зависит.
+`keyboards/*` is a pure UI layer, it depends on nobody.
 
-Правило: хендлер не трогает `session` и ничего не считает сам — только вызов сервиса.
+The rule: a handler does not touch `session` and computes nothing itself — only a service call.
 
-### `domain/` — единственная граница, которую сторожит машина (ветка 5)
+### `domain/` — the one boundary a machine guards (branch 5)
 
 ```
 domain/
-  models.py      frozen-датаклассы CartLine, CartProblem
+  models.py      frozen dataclasses CartLine, CartProblem
   pricing.py     cart_total(lines) -> Decimal
   cart_rules.py  check(lines) -> list[CartProblem]
 ```
 
-Внутри `domain/` запрещены импорты `aiogram` и `sqlalchemy`. Запрет проверяется тестом, который читает импорты модулей пакета и падает при нарушении.
+Inside `domain/`, imports of `aiogram` and `sqlalchemy` are forbidden. The ban is checked by a test that reads the imports of the package's modules and fails on a violation.
 
-Это выбрано вместо `services/pricing.py` осознанно: чистые функции внутри `services/` лежали бы в одном графе импортов с `order_service.py`, у которого сессия есть по определению, и граница снова держалась бы только на дисциплине — ровно то, что рассыпалось в v1.
+This was chosen over `services/pricing.py` deliberately: pure functions inside `services/` would sit in the same import graph as `order_service.py`, which has a session by definition, and the boundary would again rest on discipline alone — exactly what fell apart in v1.
 
-Датаклассы вместо словарей фиксируют форму корзины в одном месте. В v1 форма не закреплена нигде, отсюда три её разных представления.
+Dataclasses instead of dictionaries pin the shape of the cart down in one place. In v1 the shape is pinned nowhere, hence its three different representations.
 
-**Следствие:** правила возвращают типизированные `CartProblem`, а не готовые строки. Текст и эмодзи рисует хендлер. В v1 наоборот — `validate_cart` возвращает HTML с эмодзи прямо из сервиса (`order_service.py:50-71`), из-за чего логика непереиспользуема.
+**Consequence:** the rules return typed `CartProblem` values, not finished strings. Text and emoji are drawn by the handler. In v1 it is the other way round — `validate_cart` returns HTML with emoji straight out of the service (`order_service.py:50-71`), which makes the logic non-reusable.
 
-Поток одного запроса:
+The flow of one request:
 
 ```
-handlers/menu.py           user_id из callback, вызов сервиса
+handlers/menu.py           user_id from the callback, service call
       ↓
-services/cart_service.py   SELECT products, сборка list[CartLine]
+services/cart_service.py   SELECT products, assembling list[CartLine]
       ↓
 domain/cart_rules.py       check(lines) -> [CartProblem(...)]
 domain/pricing.py          cart_total(lines) -> Decimal
       ↓
-services/cart_service.py   применение, commit
+services/cart_service.py   applying, commit
       ↓
-handlers/menu.py           CartProblem -> текст с эмодзи, отправка
+handlers/menu.py           CartProblem -> text with emoji, sending
 ```
 
-## Где живёт состояние
+## Where the state lives
 
-### Корзина — таблица, только количество (ветка 2)
+### The cart — a table, quantity only (branch 2)
 
 ```
 cart_items(user_id, product_id, qty)   UNIQUE(user_id, product_id)
 ```
 
-**Колонки цены нет.** Цена всегда читается живой из `products` при отображении и подсчёте. Снапшот делается один раз при создании заказа — в `order_items.price`, и он неизменен.
+**There is no price column.** The price is always read live from `products` when displaying and totalling. The snapshot is taken once, at order creation — into `order_items.price` — and it is immutable.
 
-Обоснование: снапшот цены — единственная причина существования ветки сверки цен в `validate_cart` (`order_service.py:58-64`), которая сравнивает сохранённую цену с текущей, пишет предупреждение и мутирует входной словарь. Без сохранённой цены это состояние не может возникнуть — код не переписывается, а удаляется.
+Reasoning: the price snapshot is the sole reason the price-reconciliation branch exists in `validate_cart` (`order_service.py:58-64`), which compares the stored price with the current one, writes a warning and mutates the incoming dictionary. Without a stored price that state cannot arise — the code is not rewritten, it is deleted.
 
-Остаются три проверки: товар удалён, нет в наличии, количество больше `max_quantity`.
+Three checks remain: the product is deleted, it is out of stock, the quantity is above `max_quantity`.
 
-Принятый компромисс: изменение цены между добавлением в корзину и оплатой происходит молча. Оправдано масштабом — правки цен редкие и намеренные, их делает один человек.
+The accepted trade-off: a price change between adding to the cart and paying happens silently. Justified by scale — price edits are rare and deliberate, and one person makes them.
 
 ### FSM
 
-Остаётся `MemoryStorage`, но используется только для короткоживущего шага визарда оформления заказа — какое поле пользователь вводит сейчас. Потеря шага при рестарте некритична: корзина в БД и не страдает.
+`MemoryStorage` stays, but is used only for the short-lived step of the checkout wizard — which field the user is entering right now. Losing the step on a restart is not critical: the cart is in the database and does not suffer.
 
-Идиома v1 «`state.clear()`, затем вручную восстановить корзину» (более 20 мест) исчезает вместе с корзиной в FSM.
+The v1 idiom "`state.clear()`, then restore the cart by hand" (more than 20 places) disappears along with the cart in the FSM.
 
-### Джобы — sweep вместо date-триггеров (ветка 3)
+### Jobs — a sweep instead of date triggers (branch 3)
 
-Одна interval-джоба APScheduler раз в 60 секунд вместо двух date-джоб на каждый заказ:
+One APScheduler interval job every 60 seconds instead of two date jobs per order:
 
 ```
-каждые 60 с:
-  просроченные предупреждения → уведомить, warning_sent = True
-  просроченные оплаты         → CANCELLED_UNPAID, уведомить
+every 60 s:
+  overdue warnings → notify, warning_sent = True
+  overdue payments → CANCELLED_UNPAID, notify
 ```
 
-Использует уже написанные и не вызываемые в v1 `get_orders_pending_warning` (`order_service.py:236`) и `get_orders_to_auto_cancel` (`:252`).
+It uses `get_orders_pending_warning` (`order_service.py:236`) and `get_orders_to_auto_cancel` (`:252`), already written in v1 and never called there.
 
-В схеме: `orders.warning_sent` остаётся и наконец начинает писаться; `reminder_job_id` и `cancel_job_id` в v2 не переносятся.
+In the schema: `orders.warning_sent` stays and is finally written to; `reminder_job_id` and `cancel_job_id` are not carried over into v2.
 
-Что решило в пользу sweep:
+What settled it in favour of the sweep:
 
-- джобы v1 и так перечитывают заказ из БД и выходят при смене статуса (`scheduler.py:33`, `:55`) — то есть уже идемпотентны, а авторитет у БД; это ровно то свойство, которое требуется sweep-подходу;
-- `schedule_order_jobs` передаёт живой объект `Bot` в kwargs (`scheduler.py:91`, `:99`) — он не сериализуется, персистентный jobstore потребовал бы переписать сигнатуры джоб;
-- `SQLAlchemyJobStore` только синхронный — рядом с async-движком пришлось бы держать второй, синхронный;
-- состояние живёт в `orders`, а не в отдельной таблице джоб, поэтому рассинхрон между ними невозможен, а перезапуск переживается без всякой персистентности.
+- v1's jobs already re-read the order from the database and bail out when the status has changed (`scheduler.py:33`, `:55`) — that is, they are already idempotent, and the database is the authority; that is exactly the property the sweep approach requires;
+- `schedule_order_jobs` passes a live `Bot` object in kwargs (`scheduler.py:91`, `:99`) — it does not serialise, and a persistent jobstore would require rewriting the job signatures;
+- `SQLAlchemyJobStore` is synchronous only — it would mean keeping a second, synchronous engine next to the async one;
+- the state lives in `orders`, not in a separate jobs table, so drift between the two is impossible, and a restart is survived without any persistence at all.
 
-Компромисс: точность срабатывания ±60 секунд.
+The trade-off: firing accuracy of ±60 seconds.
 
-## Права доступа (ветка 4)
+## Access control (branch 4)
 
-**`ADMIN_IDS: set[int]`** из переменной окружения. Таблица `staff` отклонена: схема, CRUD-хендлеры и проблема начальной загрузки ради множества из одного элемента, которое не меняется.
+**`ADMIN_IDS: set[int]`** from an environment variable. A `staff` table was rejected: a schema, CRUD handlers and a bootstrap problem for the sake of a one-element set that does not change.
 
-**Главное в этой ветке — структурное решение:** авторизация становится свойством принадлежности к роутеру. Все админские хендлеры лежат на админском роутере под фильтром `IsAdmin`; в клиентских роутерах админских хендлеров нет ни одного. Проверку невозможно забыть в отдельном хендлере — её невозможно не унаследовать.
+**The main thing in this branch is the structural decision:** authorisation becomes a property of router membership. Every admin handler sits on the admin router under the `IsAdmin` filter; the customer routers hold no admin handler at all. The check cannot be forgotten in an individual handler — it cannot fail to be inherited.
 
-Конкретно: подтверждение и отклонение оплаты живут в `handlers/admin/payments.py`, а не в `checkout.py`.
+Concretely: confirming and rejecting a payment live in `handlers/admin/payments.py`, not in `checkout.py`.
 
-### 🔴 Дыра в v1, которую это чинит
+### 🔴 The hole in v1 that this fixes
 
-`admin_confirm_payment` (`checkout.py:320-321`) и `admin_reject_payment` (`:361`) зарегистрированы на роутере **checkout**, а `IsAdmin` навешан только на роутер `admin.py` (`admin.py:46-47`). Собственной проверки в теле нет — обработчик идёт прямо в `update_order_status(..., PAID)` (`:335`).
+`admin_confirm_payment` (`checkout.py:320-321`) and `admin_reject_payment` (`:361`) are registered on the **checkout** router, while `IsAdmin` is attached only to the `admin.py` router (`admin.py:46-47`). There is no check of its own in the body — the handler goes straight into `update_order_status(..., PAID)` (`:335`).
 
-Любой пользователь, отправив соответствующую callback-data, помечает **любой** заказ оплаченным.
+Any user who sends the matching callback data marks **any** order paid.
 
-v1 не правится (реальных клиентов нет, дыра остаётся в замороженном коде). Здесь это зафиксировано как требование к v2.
+v1 is not being fixed (there are no real customers, the hole stays in the frozen code). Here it is recorded as a requirement for v2.
 
-## Деньги (ветка 7)
+## Money (branch 7)
 
-**`Decimal` + `Numeric(10, 2)`** сквозной. Схема v1 уже такова во всех трёх местах (`models.py:76, 97, 115`), SQLAlchemy отдаёт `Decimal` без конверсии.
+**`Decimal` + `Numeric(10, 2)`** end to end. The v1 schema is already like that in all three places (`models.py:76, 97, 115`), SQLAlchemy hands back `Decimal` without conversion.
 
-Все float-ы в v1 — порча на стороне хендлеров: `float(db_p.price)` (`order_service.py:58`), float-свёртки в `menu.py:70-78` и `checkout.py:33-39`. В greenfield эти места просто не пишутся.
+Every float in v1 is corruption on the handler side: `float(db_p.price)` (`order_service.py:58`), float collapses in `menu.py:70-78` and `checkout.py:33-39`. In a greenfield those places are simply never written.
 
-Правило: `float()` не появляется рядом с деньгами нигде. `domain/` принимает и возвращает только `Decimal`.
+The rule: `float()` appears nowhere near money. `domain/` accepts and returns `Decimal` only.
 
-Integer cents рассмотрен и отклонён — надёжнее, но требует конверсии на каждой границе рендера и админского ввода, а цены и так целые в евро.
+Integer cents were considered and rejected — more reliable, but they require conversion at every rendering and admin-input boundary, and the prices are whole euros anyway.
 
-## Схема БД — что чинится относительно v1
+## The database schema — what gets fixed relative to v1
 
-- `products.category_id` — **настоящий FK** на `categories.id`. В v1 связь держится на совпадении строк `Product.category` и `Category.slug` через `primaryjoin` (`models.py:52-54`, `:82-87`).
-- `orders.status` — **enum** вместо строки `String(20)`.
-- `cart_items` — новая таблица (ветка 2).
-- `orders.reminder_job_id` / `cancel_job_id` — **не переносятся** (ветка 3).
-- Миграции — **Alembic с нуля**, вместо raw-SQL патчей с `except: pass` в `db/init_db.py`.
-- Сид не перезаписывает цены существующих товаров при каждом старте.
+- `products.category_id` — a **real FK** to `categories.id`. In v1 the link rests on the strings `Product.category` and `Category.slug` matching, through `primaryjoin` (`models.py:52-54`, `:82-87`).
+- `orders.status` — an **enum** instead of a `String(20)` string.
+- `cart_items` — a new table (branch 2).
+- `orders.reminder_job_id` / `cancel_job_id` — **not carried over** (branch 3).
+- Migrations — **Alembic from scratch**, instead of raw-SQL patches with `except: pass` in `db/init_db.py`.
+- The seed does not overwrite the prices of existing products on every start.
 
-## Google Sheets (ветка 6)
+## Google Sheets (branch 6)
 
-**Выкинуть целиком.** В v2 нет ни зависимостей (`gspread`, `google-auth`, `google-auth-oauthlib`, `requests-oauthlib`), ни переменных `GOOGLE_*`, ни упоминаний в README. Сервис-аккаунт не нужен.
+**Drop it entirely.** v2 has no dependencies (`gspread`, `google-auth`, `google-auth-oauthlib`, `requests-oauthlib`), no `GOOGLE_*` variables and no mentions in the README. No service account is needed.
 
-Фича прожила весь v1 в виде четырёх зависимостей, пяти упоминаний в README и одного утекшего ключа — при нуле строк кода. При одном ресторане админский список заказов внутри бота закрывает ту же потребность. Отказ убирает целый класс отказов (недоступность внешнего API в момент создания заказа) и одну поверхность для утечки секретов.
+The feature lived through the whole of v1 as four dependencies, five mentions in the README and one leaked key — at zero lines of code. With one restaurant, the admin order list inside the bot covers the same need. Dropping it removes an entire class of failure (an external API being unavailable at the moment an order is created) and one surface for leaking secrets.
 
-## Тесты (ветка 8)
+## Tests (branch 8)
 
 ```
 tests/
-  domain/                      без базы, без async, миллисекунды
+  domain/                      no database, no async, milliseconds
     test_pricing.py
     test_cart_rules.py
     test_no_framework_imports.py
-  services/                    реальный Postgres
+  services/                    a real Postgres
     test_cart_service.py
     test_order_service.py
     test_sweep.py
 ```
 
-Фикстура сервисного слоя: сессия в транзакции, откат после каждого теста.
+The service-layer fixture: a session inside a transaction, rolled back after every test.
 
-Хендлеры автоматически не тестируются — после выноса правил в `domain/` в них не остаётся логики, которую стоило бы ловить. Перед запуском happy path проверяется руками один раз.
+Handlers are not tested automatically — once the rules moved into `domain/`, no logic worth catching is left in them. Before a run the happy path is checked by hand once.
 
-Интеграционный слой обязателен: sweep-джоба, корзина в таблице и `Numeric(10,2)` — поведение базы, юнитами не ловится. Именно там сосредоточен новый риск v2.
+The integration layer is mandatory: the sweep job, the cart in a table and `Numeric(10,2)` are database behaviour, and unit tests do not catch it. That is precisely where v2's new risk is concentrated.
 
-Почему нет тестов хендлеров: `test_order_flow.py` и `test_production_flow.py` в v1 — ручные asyncio-скрипты с `MockBot`, дёргающие хендлеры по живой базе; `pytest` даже не в зависимостях. Это и есть цена тестирования хендлеров — подделка `Bot`, `Message`, `CallbackQuery`, `FSMContext` и поломка от любой правки текста или клавиатуры. Отсутствие тестов в v1 — следствие этой цены, а не лени.
+Why there are no handler tests: `test_order_flow.py` and `test_production_flow.py` in v1 are manual asyncio scripts with a `MockBot`, poking handlers against a live database; `pytest` is not even among the dependencies. That is exactly the price of testing handlers — faking `Bot`, `Message`, `CallbackQuery`, `FSMContext`, and breaking on any edit to a text or a keyboard. The absence of tests in v1 is a consequence of that price, not of laziness.
 
-## Что решено из проблем v1
+## What is solved out of v1's problems
 
-| Проблема v1 | Как закрыта |
+| v1 problem | How it is closed |
 |---|---|
-| #1 персистентность корзины и джоб | корзина в таблице; джобы через sweep, состояние в `orders` |
-| #2 связь товар–категория строками | настоящий FK `products.category_id` |
-| #3 нет миграций | Alembic с нуля |
-| #4 сид перезаписывает цены | сид не трогает существующие товары |
-| #5 дублирование расчёта | `domain/` с запретом импортов, проверяемым тестом |
-| #6 расходящиеся правила количества | одно правило в `domain/cart_rules.py` |
-| #7 единственный захардкоженный админ | `ADMIN_IDS` + авторизация через роутер |
-| #8 платежи | закрыто: ручное подтверждение, интеграции нет |
-| #9 мёртвая фича Google Sheets | не переносится |
-| #10 нет тестов | `pytest`, юниты `domain/` + интеграционные сервисов |
-| #11 гигиена репозитория | новый репозиторий без секретов, логов и артефактов |
-| #12 long polling, один инстанс | остаётся, митигируется эксплуатационно |
+| #1 persistence of the cart and the jobs | the cart in a table; jobs through the sweep, state in `orders` |
+| #2 product–category link by strings | a real FK `products.category_id` |
+| #3 no migrations | Alembic from scratch |
+| #4 the seed overwrites prices | the seed does not touch existing products |
+| #5 duplicated calculation | `domain/` with an import ban checked by a test |
+| #6 diverging quantity rules | one rule in `domain/cart_rules.py` |
+| #7 a single hardcoded admin | `ADMIN_IDS` + authorisation through the router |
+| #8 payments | closed: manual confirmation, no integration |
+| #9 the dead Google Sheets feature | not carried over |
+| #10 no tests | `pytest`, `domain/` units + service integration tests |
+| #11 repository hygiene | a new repository with no secrets, logs or artefacts |
+| #12 long polling, one instance | stays, mitigated operationally |
 
-## Действие вне архитектуры
+## An action outside the architecture
 
-🔴 **Отозвать ключ сервис-аккаунта Google.** `mythical-zodiac-496315-t0-7a51ca0567c1.json` закоммичен в `1c9a259` и остаётся в объектах git старого репозитория.
+🔴 **Revoke the Google service-account key.** `mythical-zodiac-496315-t0-7a51ca0567c1.json` is committed in `1c9a259` and remains in the git objects of the old repository.
 
-Новый репозиторий этого не чинит: старый сохраняется, ключ в его истории продолжает действовать. Удаление файла и правило в `.gitignore` **не отзывают** ключ — нужен отзыв в Google Cloud Console.
+The new repository does not fix this: the old one is kept, and the key in its history stays valid. Deleting the file and a rule in `.gitignore` **do not revoke** the key — it has to be revoked in the Google Cloud Console.
 
-## Остаточный риск
+## Residual risk
 
-Направление `handlers → services → db` по-прежнему держится на дисциплине — ничто структурно не мешает через полгода снова начать считать прямо в хендлере, как произошло в v1.
+The `handlers → services → db` direction still rests on discipline — nothing structurally stops someone, six months from now, from computing straight in a handler again, the way it happened in v1.
 
-Механически сторожится только граница `domain/`. Это осознанное сужение: одна проверяемая граница вокруг правил, которые дублировались, вместо необеспеченного правила вокруг всего.
+Only the `domain/` boundary is guarded mechanically. This is a deliberate narrowing: one checkable boundary around the rules that were being duplicated, instead of an unenforced rule around everything.
