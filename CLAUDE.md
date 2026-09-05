@@ -138,23 +138,23 @@ is suffixed `_for_admin`.** Never change the visibility semantics of an existing
 function.** The handler parses input and calls it; the rule still exists exactly once.
 
 **Naming.** Services are verbs on the domain (`create_order`, `set_status`, `resolve`).
-Comments and code are English; `docs/` and `README.md` are Russian.
+Comments, code, docs/, and README.md are English.
 
 ## Tests
 
 ```bash
-pytest tests/domain          # no database, no drivers, ~0.1s
-pytest                       # full suite, 107 tests; service tests skip without
-                             # TEST_DATABASE_URL
+pytest tests/domain            # no database, no drivers, milliseconds
+pytest                         # full suite; service tests skip without TEST_DATABASE_URL
+pytest tests/services --co -q  # confirm the service-test count before trusting green
 ```
 
 Must stay green:
 
-- **30 domain tests** in `tests/domain/`. They run with nothing but `pytest` installed —
-  if they start needing a driver or an event loop, the boundary has leaked.
-- **77 service tests** in `tests/services/` — 27 cart, 25 order, 25 sweep. They need
-  `TEST_DATABASE_URL` and skip without it, so a green run on a machine without one
-  proves less than it looks; check the count.
+- **Domain tests** in `tests/domain/` run with nothing but `pytest` installed — if they
+  start needing a driver or an event loop, the boundary has leaked.
+- **Service tests** in `tests/services/` (cart, order, sweep) need `TEST_DATABASE_URL`
+  and skip silently without it, so a green run on a machine without one proves less than
+  it looks — check the collected count, don't trust the PASS line.
 - **`test_no_framework_imports.py`** — the only architectural rule a machine enforces.
 
 Never put database fixtures in `tests/conftest.py`; they belong in `tests/services/conftest.py`.
