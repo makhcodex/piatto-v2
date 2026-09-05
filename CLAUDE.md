@@ -57,11 +57,13 @@ handlers/            aiogram routers — I/O and rendering only
   __init__.py        build_router(); admin router included first
   render.py          CartProblem/CartLine -> text; the only place emoji live
   start.py menu.py cart.py checkout.py    customer flows, zero admin handlers
+  orders.py          the caller's own order history (`order:mine`, `order:view:`)
   notify.py          notify_user(bot, telegram_id, text); admin handlers delegate here
   admin/__init__.py  IsAdmin filter attached to the router
   admin/payments.py  confirm/reject payment
   admin/catalogue.py products and categories
-  admin/orders.py    order list and status advancement
+  admin/orders.py    active list, history, detail, status advancement
+  admin/catalogue_states.py  FSM wizard states for the catalogue
 
 db/models.py         schema; OrderStatus enum, ACTIVE_STATUSES, NEXT_STATUS
 db/engine.py         lazy engine + session factory, dispose_engine
@@ -142,17 +144,23 @@ Comments and code are English; `docs/` and `README.md` are Russian.
 
 ```bash
 pytest tests/domain          # no database, no drivers, ~0.1s
-pytest                       # full suite; service tests skip without TEST_DATABASE_URL
+pytest                       # full suite, 107 tests; service tests skip without
+                             # TEST_DATABASE_URL
 ```
 
 Must stay green:
 
 - **30 domain tests** in `tests/domain/`. They run with nothing but `pytest` installed —
   if they start needing a driver or an event loop, the boundary has leaked.
+- **77 service tests** in `tests/services/` — 27 cart, 25 order, 25 sweep. They need
+  `TEST_DATABASE_URL` and skip without it, so a green run on a machine without one
+  proves less than it looks; check the count.
 - **`test_no_framework_imports.py`** — the only architectural rule a machine enforces.
 
 Never put database fixtures in `tests/conftest.py`; they belong in `tests/services/conftest.py`.
-Service tests use a session inside a transaction that is rolled back per test.
+Service tests use a session inside a transaction that is rolled back per test. Anything
+that notifies takes a bot: the `bot` / `failing_bot` fixtures are fakes that record or
+raise, never a real `Bot`.
 
 ## Startup
 
@@ -177,14 +185,26 @@ handler (`start`, `menu`, `cart`, `checkout`); `handlers/render.py`, `handlers/_
 and the admin surface — `admin/__init__.py`, `admin/payments.py` (`pay:` callbacks),
 `admin/orders.py` (`order:` callbacks: active list, detail, advance), `admin/catalogue.py`
 (`prod:` and `ctg:` callbacks: product and category CRUD, FSM wizards in
-`admin/catalogue_states.py`). `tests/domain/` is 30 passing.
+`admin/catalogue_states.py`); the customer's own history (`handlers/orders.py`) and
+the admin history (`/history`). The suite is 107 passing: 30 domain, 77 service.
 
-Migrations: `00ba32237596` creates all six tables (`down_revision = None`), `a1c4f9e27b30`
-adds `uq_products_name`. New schema changes go in a migration on top of the chain, never
-by editing an existing one.
+Migrations, in order: `00ba32237596` creates all six tables (`down_revision = None`),
+`a1c4f9e27b30` adds `uq_products_name`, `c7d2e81f4a56` adds `orders.contact_name` and
+`orders.contact_phone` (both nullable — orders placed before it have neither). New schema
+changes go in a migration on top of the chain, never by editing an existing one.
 
-**Not written yet:** `tests/services/` — every test skips with `TODO`. That is the whole
-remaining backlog.
+**Backlog**, in the order it is worth doing:
+
+1. Service tests for `product_service`, `category_service` and `user_service` — the only
+   part of `services/` with no test file. The fixtures they need already exist.
+2. Admin statistics (order count, revenue, breakdown by status). v1 had it, v2 does not.
+3. Pagination and a status filter for the admin history — `list_recent` returns one
+   unpaged block of 20.
+4. Deploy to Railway, then the README screenshots and bot link.
+
+Deliberately not carried over from v1: admin deletion of an order. Orders have no
+soft-delete flag, and a hard delete would destroy the `order_items.price` snapshot that
+invariant 6 calls immutable. Decide before implementing, do not add it by reflex.
 
 **Seeding.** `scripts/seed.py` is standalone and never called from `main.py`. It upserts
 through `category_service.upsert` and `product_service.upsert_seed`, keyed on
