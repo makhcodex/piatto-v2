@@ -6,12 +6,69 @@ manual payment confirmation — all inside Telegram.
 ## Demo
 
 <!-- Live bot: @______bot — add the link after deploy -->
+![Piatto demo](docs/img/demo.gif)
 
-<!--
-## Screenshots
-Fill in after deploy. Frames: catalogue with photos · cart · checkout ·
-"My Orders" · admin notification with payment confirmation buttons.
--->
+
+```mermaid
+erDiagram
+    categories ||--o{ products    : categorises
+    users      ||--o{ orders      : places
+    users      ||--o{ cart_items  : holds
+    products   ||--o{ cart_items  : "listed in"
+    orders     ||--o{ order_items : contains
+    products   ||--o{ order_items : "snapshotted in"
+
+    categories {
+        integer id         PK
+        varchar slug       UK "String(32), indexed"
+        varchar name          "String(64)"
+        boolean is_deleted    "default false"
+    }
+    users {
+        integer     id          PK
+        bigint      telegram_id UK
+        varchar     username       "String(64), nullable"
+        varchar     phone          "String(20), nullable"
+        timestamptz created_at
+    }
+    products {
+        integer id           PK
+        integer category_id  FK "categories.id, indexed"
+        varchar name         UK
+        text    description     "nullable"
+        numeric price          "Numeric(10,2)"
+        varchar image_url
+        boolean in_stock       "default true"
+        integer max_quantity
+        boolean is_deleted     "default false"
+    }
+    cart_items {
+        integer     id         PK
+        integer     user_id    FK "users.id, ON DELETE CASCADE"
+        integer     product_id FK "products.id"
+        integer     qty           "quantity only, no price column by design"
+        timestamptz updated_at
+    }
+    orders {
+        integer      id            PK
+        integer      user_id       FK "users.id"
+        order_status status           "PENDING PAID PREPARING DELIVERING DELIVERED CANCELLED_UNPAID"
+        numeric      total_price      "Numeric(10,2)"
+        text         address
+        varchar      contact_name     "String(64), per-order copy"
+        varchar      contact_phone    "String(20), per-order copy"
+        timestamptz  created_at
+        boolean      warning_sent     "default false, written by the sweep"
+    }
+    order_items {
+        integer id         PK
+        integer order_id   FK "orders.id, ON DELETE CASCADE"
+        integer product_id FK "products.id"
+        integer quantity
+        numeric price         "Numeric(10,2), the one immutable price snapshot"
+    }
+```
+cart_items carries UNIQUE(user_id, product_id) — one row per product per user; adding again bumps qty. products carries UNIQUE(name), the natural key that makes scripts/seed.py idempotent.
 
 ## Features
 
@@ -38,6 +95,23 @@ Python 3.11 · aiogram 3 (long polling) · PostgreSQL · SQLAlchemy 2 (async) ·
 APScheduler · Alembic · Railway (worker, no HTTP port).
 
 ## Architecture
+
+```mermaid
+flowchart TD
+    H["handlers/<br/>aiogram routers · I/O + rendering only"]
+    S["services/<br/>session · transactions · orchestration"]
+    DB["db/<br/>SQLAlchemy models · engine · migrations"]
+    DOM["domain/<br/>pure rules · no framework imports"]
+    K["keyboards/<br/>pure UI · depends on nothing"]
+
+    H --> S
+    S --> DB
+    S --> DOM
+    H -. renders .-> K
+
+    classDef enforced fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    class DOM enforced;
+```
 
 ### Layout
 
