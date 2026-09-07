@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  tests:
+    name: pytest (domain + services)
+    runs-on: ubuntu-latest
+
+    # The 77 service tests skip themselves when TEST_DATABASE_URL is unset, so a
+    # run without a database would report green on 30 domain tests alone. The
+    # service container below is what makes the badge honest.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: piatto_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d piatto_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Async driver: tests/services/conftest.py hands this straight to
+      # create_async_engine.
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/piatto_test
+      # Not read by the suite, which works off TEST_DATABASE_URL, but pointed at
+      # the same database so nothing that falls through to db/engine.py can reach
+      # for a production URL.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/piatto_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Mirrors runtime.txt (python-3.11), not the local interpreter.
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Show collected test count
+        run: pytest --collect-only -q | tail -1
+
+      # No `alembic upgrade head` on purpose: tests/services/conftest.py creates
+      # the schema itself with Base.metadata.create_all on the first session
+      # fixture, so a fresh, empty database is exactly what it expects.
+      - name: Run the full suite
+        run: pytest -q -rs --junitxml=junit.xml
+
+      - name: Assert no test was skipped
+        if: always()
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+
+          suite = ET.parse("junit.xml").getroot()
+          if suite.tag == "testsuites":
+              suite = suite[0]
+
+          total = int(suite.get("tests", 0))
+          skipped = int(suite.get("skipped", 0))
+          failures = int(suite.get("failures", 0))
+          errors = int(suite.get("errors", 0))
+          print(f"tests={total} failures={failures} errors={errors} skipped={skipped}")
+
+          if skipped:
+              sys.exit(
+                  f"{skipped} test(s) skipped. The service suite skips itself when "
+                  f"TEST_DATABASE_URL is unset or unreachable - the Postgres service "
+                  f"container is not doing its job."
+              )
+          if total < 107:
+              sys.exit(f"expected at least 107 tests, collected {total}")
+          PY
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: junit.xml
+          if-no-files-found: warn
