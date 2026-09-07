@@ -11,6 +11,8 @@ venv/
 # Credentials of any kind. v1 committed a Google service-account key.
 *.json
 !package.json
+# Deployment config, not a credential — the blanket rule above would hide it.
+!railway.json
 *.pem
 *.key
 

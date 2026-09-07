@@ -10,8 +10,28 @@ def _parse_admin_ids(raw: str) -> frozenset[int]:
     return frozenset(int(part) for part in raw.replace(" ", "").split(",") if part)
 
 
+def _normalise_database_url(raw: str) -> str:
+    """Force an async driver onto a bare Postgres URL.
+
+    Railway hands out DATABASE_URL as "postgres://..." or "postgresql://...", with
+    no driver in the scheme; create_async_engine needs one. Rewrite those two
+    schemes to "postgresql+asyncpg://" and leave everything else untouched — a URL
+    that already names a driver ("+asyncpg", "+psycopg") keeps it, and so does an
+    empty or non-Postgres value, which main.py and db/engine.py report on their own.
+
+    migrations/env.py imports DATABASE_URL from here and is async too, so the
+    migrations and the bot always agree on the driver.
+    """
+    scheme, separator, rest = raw.partition("://")
+    if not separator or "+" in scheme:
+        return raw
+    if scheme in ("postgres", "postgresql"):
+        return f"postgresql+asyncpg://{rest}"
+    return raw
+
+
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+DATABASE_URL: str = _normalise_database_url(os.getenv("DATABASE_URL", ""))
 
 # Admin identity lives here, not in a staff table. One restaurant, one operator.
 ADMIN_IDS: frozenset[int] = _parse_admin_ids(os.getenv("ADMIN_IDS", ""))
