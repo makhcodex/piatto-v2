@@ -195,3 +195,6 @@ worth catching is left in them. The happy path is checked by hand.
 Railway, service type `worker`, long polling, no HTTP port. One instance: a second one
 on the same token causes an update-fetching conflict. `alembic upgrade head` is a
 separate step before startup (Pre-deploy Command); `main.py` does not run migrations.
+
+Full runbook — Railway setup, environment variables, migrations, first deploy and
+rollback — in [docs/DEPLOY.md](docs/DEPLOY.md).
